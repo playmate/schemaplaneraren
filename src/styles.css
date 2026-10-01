@@ -650,6 +650,35 @@ input:focus {
   background: #111827;
 }
 
+.blocked-times {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.blocked-times > strong {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.blocked-times > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.blocked-times span {
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
 .staff-settings-top {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
