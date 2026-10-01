@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.21';
+const APP_VERSION = '0.1.22';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -2979,7 +2979,10 @@ export default function App() {
                   <button onClick={() => setCursorDate(addDays(cursorDate, 7))}>→</button>
                 </div>
                 <h2>Vecka {getIsoWeek(cursorDate)}</h2>
-                <button className="secondary" onClick={() => generateSimpleSchedule(staff)}>Skapa veckoschema</button>
+                <div className="schedule-create-actions">
+                  <button className="secondary" onClick={() => generateSimpleSchedule(staff)}>Skapa veckoschema</button>
+                  <button className="secondary" onClick={generateMonthSchedule}>Skapa månadschema</button>
+                </div>
               </div>
 
               <div className="shift-length-control">
