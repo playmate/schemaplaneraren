@@ -96,21 +96,31 @@ function parseDuration(value: string) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-function endForNetDuration(start: string, availableEnd: string, desiredNetMinutes: number) {
+function contiguousShiftEnd(start: string, availableEnd: string, desiredMinutes: number) {
   const startMin = toMinutes(start);
   const maxEnd = toMinutes(availableEnd);
-  let current = startMin;
-  let worked = 0;
+  const lunchStart = toMinutes(LUNCH_START);
+  const lunchEnd = toMinutes(LUNCH_END);
 
-  while (current < maxEnd && worked < desiredNetMinutes) {
-    const next = Math.min(current + 5, maxEnd);
-    const segmentStart = minutesToTime(current);
-    const segmentEnd = minutesToTime(next);
-    worked += (next - current) - lunchMinutesInside(segmentStart, segmentEnd);
-    current = next;
+  if (startMin >= lunchStart && startMin < lunchEnd) {
+    return LUNCH_END;
   }
 
-  return minutesToTime(current);
+  let limit = maxEnd;
+  if (startMin < lunchStart) {
+    limit = Math.min(limit, lunchStart);
+  }
+
+  return minutesToTime(Math.min(limit, startMin + desiredMinutes));
+}
+
+function softColor(hex: string, alpha = 0.24) {
+  const clean = hex.replace('#', '');
+  const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 const defaultStaff: Staff[] = [
@@ -287,6 +297,7 @@ function DayColumn({
                   left: `calc(${lane * width}% + 4px)`,
                   width: `calc(${width}% - 8px)`,
                   borderTopColor: person.color,
+                  background: softColor(person.color, 0.28),
                 }}
               >
                 <button
@@ -296,7 +307,7 @@ function DayColumn({
                 >
                   ×
                 </button>
-                <strong>{person.name}</strong>
+                <strong className="assignment-name">{person.name}</strong>
                 <span>{assignment.start}–{assignment.end}</span>
                 <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h arbete{lunch ? ` · lunch ${lunch} min` : ''}</small>
               </div>
@@ -367,13 +378,46 @@ export default function App() {
     const saved = localStorage.getItem('scheduler-simple-assignments-v1');
     if (!saved) return [];
     const parsed: Array<Partial<Assignment> & { employeeId: string; date: string }> = JSON.parse(saved);
-    return parsed.map((assignment, index) => ({
-      id: assignment.id ?? `legacy-${assignment.date}-${assignment.employeeId}-${index}`,
-      employeeId: assignment.employeeId,
-      date: assignment.date,
-      start: assignment.start ?? WORK_START,
-      end: assignment.end ?? WORK_END,
-    }));
+    return parsed.flatMap((assignment, index) => {
+      const base = {
+        employeeId: assignment.employeeId,
+        date: assignment.date,
+        start: assignment.start ?? WORK_START,
+        end: assignment.end ?? WORK_END,
+      };
+
+      if (toMinutes(base.start) < toMinutes(LUNCH_START) && toMinutes(base.end) > toMinutes(LUNCH_START)) {
+        const parts: Assignment[] = [];
+        if (toMinutes(base.start) < toMinutes(LUNCH_START)) {
+          parts.push({
+            id: `${assignment.id ?? `legacy-${index}`}-before-lunch`,
+            employeeId: base.employeeId,
+            date: base.date,
+            start: base.start,
+            end: LUNCH_START,
+          });
+        }
+        if (toMinutes(base.end) > toMinutes(LUNCH_END)) {
+          parts.push({
+            id: `${assignment.id ?? `legacy-${index}`}-after-lunch`,
+            employeeId: base.employeeId,
+            date: base.date,
+            start: LUNCH_END,
+            end: base.end,
+          });
+        }
+        return parts;
+      }
+
+      if (toMinutes(base.start) >= toMinutes(LUNCH_START) && toMinutes(base.start) < toMinutes(LUNCH_END)) {
+        base.start = LUNCH_END;
+      }
+
+      return [{
+        id: assignment.id ?? `legacy-${assignment.date}-${assignment.employeeId}-${index}`,
+        ...base,
+      }];
+    });
   });
 
   useEffect(() => {
@@ -408,7 +452,11 @@ export default function App() {
     }
 
     const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
-    const end = endForNetDuration(workTime.start, workTime.end, shiftLengthMinutes);
+    const start =
+      toMinutes(workTime.start) >= toMinutes(LUNCH_START) && toMinutes(workTime.start) < toMinutes(LUNCH_END)
+        ? LUNCH_END
+        : workTime.start;
+    const end = contiguousShiftEnd(start, workTime.end, shiftLengthMinutes);
 
     setAssignments((current) => {
       const exists = current.some(
@@ -419,7 +467,7 @@ export default function App() {
         id: `manual-${Date.now()}-${employeeId}`,
         employeeId,
         date: dateKey,
-        start: workTime.start,
+        start,
         end,
       }];
     });
@@ -460,12 +508,23 @@ export default function App() {
       let slotIndex = 0;
 
       while (slotStart < workdayEnd) {
+        if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+          slotStart = toMinutes(LUNCH_END);
+          continue;
+        }
+
         const slotStartTime = minutesToTime(slotStart);
-        const slotEndTime = endForNetDuration(slotStartTime, WORK_END, shiftLengthMinutes);
+        const slotEndTime = contiguousShiftEnd(slotStartTime, WORK_END, shiftLengthMinutes);
         const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
         const actualEndTime = minutesToTime(slotEnd);
 
-        if (slotEnd <= slotStart) break;
+        if (slotEnd <= slotStart) {
+          if (slotStart < toMinutes(LUNCH_END)) {
+            slotStart = toMinutes(LUNCH_END);
+            continue;
+          }
+          break;
+        }
 
         const isClosingShift = slotEnd === workdayEnd;
 
@@ -533,6 +592,9 @@ export default function App() {
         }
 
         slotStart = slotEnd;
+        if (slotStart === toMinutes(LUNCH_START)) {
+          slotStart = toMinutes(LUNCH_END);
+        }
         slotIndex += 1;
       }
     }
