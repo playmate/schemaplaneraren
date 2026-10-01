@@ -1767,7 +1767,7 @@ export default function App() {
 
     if (
       dayCommandKey &&
-      /^(gör\s+om|generera\s+om|skapa\s+om|lägg\s+om|schemalägg\s+om)\b/.test(text)
+      /^(gör\s+om|generera\s+om|skapa\s+om|lägg\s+om|schemalägg\s+om|fyll|skapa|schemalägg|generera|lägg\s+schema\s+för)\b/.test(text)
     ) {
       regenerateDay(dayCommandKey);
       setPrompt('');
@@ -2023,7 +2023,7 @@ export default function App() {
             {showPromptHelp && (
               <div className="prompt-help-panel">
                 <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “generera schema” · “fyll schema”</span></div>
-                <div><strong>Gör om en dag</strong><span>“gör om fredag” · “generera om tisdag” · “lägg om onsdag”</span></div>
+                <div><strong>Skapa/gör om en dag</strong><span>“fyll torsdag” · “skapa torsdag” · “schemalägg torsdag” · “gör om fredag” · “generera om tisdag”</span></div>
                 <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “rensa schema”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
                 <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
