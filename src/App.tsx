@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.17';
+const APP_VERSION = '0.1.18';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -170,6 +170,21 @@ function getAssignmentWarnings(
   const nextDateKey = localDateKey(addDays(date, 1));
   const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
   const blocked = person.blockedTimes?.[day] ?? [];
+
+  if (!person.days[day]) {
+    warnings.push(`${person.name} är normalt markerad som ledig den här dagen.`);
+  }
+
+  const sameDayAssignments = allAssignments.filter(
+    (item) =>
+      item.id !== assignment.id &&
+      item.employeeId === person.id &&
+      item.date === assignment.date
+  );
+
+  if (sameDayAssignments.length > 0) {
+    warnings.push(`${person.name} har fler än ett pass samma dag.`);
+  }
 
   if (
     toMinutes(assignment.start) < toMinutes(workTime.start) ||
@@ -810,6 +825,9 @@ export default function App() {
     const saved = localStorage.getItem('scheduler-simple-shift-length-v1');
     return saved ? Math.max(30, Number(saved)) : 120;
   });
+  const [overrideMode, setOverrideMode] = useState<boolean>(() =>
+    localStorage.getItem('scheduler-simple-override-v1') === 'true'
+  );
   const [shiftLengthText, setShiftLengthText] = useState(() => durationLabel(
     Number(localStorage.getItem('scheduler-simple-shift-length-v1') ?? 120)
   ));
@@ -928,6 +946,10 @@ export default function App() {
     localStorage.setItem('scheduler-simple-shift-length-v1', String(shiftLengthMinutes));
     setShiftLengthText(durationLabel(shiftLengthMinutes));
   }, [shiftLengthMinutes]);
+
+  useEffect(() => {
+    localStorage.setItem('scheduler-simple-override-v1', String(overrideMode));
+  }, [overrideMode]);
 
   useEffect(() => {
     if (!message) return;
@@ -1084,12 +1106,15 @@ export default function App() {
     const date = new Date(`${dateKey}T12:00:00`);
     const day = getDayKey(date);
 
-    if (!person.days[day]) {
+    if (!overrideMode && !person.days[day]) {
       setMessage(`${person.name} är markerad som ledig ${DAY_LABELS[day]}.`);
       return;
     }
 
-    if (assignments.some((assignment) => assignment.employeeId === employeeId && assignment.date === dateKey)) {
+    if (
+      !overrideMode &&
+      assignments.some((assignment) => assignment.employeeId === employeeId && assignment.date === dateKey)
+    ) {
       setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[day]}. Max ett pass per dag.`);
       return;
     }
@@ -1109,9 +1134,12 @@ export default function App() {
     }
 
     if (
-      toMinutes(workTime.start) > toMinutes(slotStart) ||
-      toMinutes(workTime.end) < toMinutes(slotEnd) ||
-      blocked.some((period) => overlapsTime(slotStart, slotEnd, period))
+      !overrideMode &&
+      (
+        toMinutes(workTime.start) > toMinutes(slotStart) ||
+        toMinutes(workTime.end) < toMinutes(slotEnd) ||
+        blocked.some((period) => overlapsTime(slotStart, slotEnd, period))
+      )
     ) {
       setMessage(`${person.name} är inte tillgänglig ${slotStart}–${slotEnd} på ${DAY_LABELS[day]}.`);
       return;
@@ -1128,7 +1156,11 @@ export default function App() {
       },
     ]);
 
-    setMessage(`${person.name} lades i det lediga passet ${slotStart}–${slotEnd} på ${DAY_LABELS[day]}.`);
+    setMessage(
+      overrideMode
+        ? `${person.name} lades på ${slotStart}–${slotEnd} med Override. Kontrollera varningssymbolen på passet.`
+        : `${person.name} lades i det lediga passet ${slotStart}–${slotEnd} på ${DAY_LABELS[day]}.`
+    );
   }
 
   function assignPerson(employeeId: string, dateKey: string) {
@@ -1138,7 +1170,7 @@ export default function App() {
     const date = new Date(`${dateKey}T12:00:00`);
     const day = getDayKey(date);
 
-    if (!person.days[day]) {
+    if (!overrideMode && !person.days[day]) {
       setMessage(`${person.name} är markerad som ledig ${DAY_LABELS[day]}.`);
       return;
     }
@@ -1311,7 +1343,7 @@ export default function App() {
         assignment.date === target.date
     );
 
-    if (existingSameDay) {
+    if (!overrideMode && existingSameDay) {
       setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[day]}. Max ett pass per dag.`);
       return;
     }
@@ -1320,9 +1352,12 @@ export default function App() {
     const blocked = person.blockedTimes?.[day] ?? [];
 
     if (
-      toMinutes(workTime.start) > toMinutes(target.start) ||
-      toMinutes(workTime.end) < toMinutes(target.end) ||
-      blocked.some((period) => overlapsTime(target.start, target.end, period))
+      !overrideMode &&
+      (
+        toMinutes(workTime.start) > toMinutes(target.start) ||
+        toMinutes(workTime.end) < toMinutes(target.end) ||
+        blocked.some((period) => overlapsTime(target.start, target.end, period))
+      )
     ) {
       setMessage(`${person.name} är inte tillgänglig ${target.start}–${target.end} på ${DAY_LABELS[day]}.`);
       return;
@@ -1339,9 +1374,11 @@ export default function App() {
     );
 
     setMessage(
-      previousPerson
-        ? `${person.name} ersatte ${previousPerson.name} på passet ${target.start}–${target.end}.`
-        : `${person.name} tog passet ${target.start}–${target.end}.`
+      overrideMode
+        ? `${person.name} placerades på passet med Override. Kontrollera varningssymbolen.`
+        : previousPerson
+          ? `${person.name} ersatte ${previousPerson.name} på passet ${target.start}–${target.end}.`
+          : `${person.name} tog passet ${target.start}–${target.end}.`
     );
   }
 
@@ -2937,6 +2974,26 @@ export default function App() {
                   />
                   <span>HH:MM</span>
                 </div>
+
+                <label className={`override-toggle ${overrideMode ? 'active' : ''}`}>
+                  <input
+                    type="checkbox"
+                    checked={overrideMode}
+                    onChange={(event) => {
+                      setOverrideMode(event.target.checked);
+                      setMessage(
+                        event.target.checked
+                          ? 'Override aktiverat. Manuella drag & drop kan bryta mot schemaregler och markeras med varningar.'
+                          : 'Override avstängt.'
+                      );
+                    }}
+                  />
+                  <span className="override-switch" aria-hidden="true" />
+                  <span className="override-copy">
+                    <strong>Override</strong>
+                    <small>Tillåt manuell placering trots regler</small>
+                  </span>
+                </label>
               </div>
 
               <div className="timeline-grid">
