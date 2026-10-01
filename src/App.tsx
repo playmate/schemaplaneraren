@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.24';
+const APP_VERSION = '0.1.25';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -3069,7 +3069,14 @@ export default function App() {
                   <span>Månad</span>
                 </div>
                 <div className="hours-summary-list">
-                  {staff.map((person) => (
+                  {[...staff]
+                    .sort(
+                      (a, b) =>
+                        (scheduledHoursByPerson[b.id] ?? 0) - (scheduledHoursByPerson[a.id] ?? 0) ||
+                        (monthlyHoursByPerson[b.id] ?? 0) - (monthlyHoursByPerson[a.id] ?? 0) ||
+                        a.name.localeCompare(b.name, 'sv')
+                    )
+                    .map((person) => (
                     <div className="hours-summary-row" key={person.id}>
                       <span className="hours-person">
                         <i style={{ background: person.color }} />
@@ -3271,7 +3278,13 @@ export default function App() {
                 <span>{selectedMonthLabel}</span>
               </div>
               <div className="month-hours-list">
-                {staff.map((person) => (
+                {[...staff]
+                  .sort(
+                    (a, b) =>
+                      (monthlyHoursByPerson[b.id] ?? 0) - (monthlyHoursByPerson[a.id] ?? 0) ||
+                      a.name.localeCompare(b.name, 'sv')
+                  )
+                  .map((person) => (
                   <div key={person.id}>
                     <span><i style={{ background: person.color }} />{person.name}</span>
                     <strong>{(monthlyHoursByPerson[person.id] ?? 0).toFixed(1)} h</strong>
