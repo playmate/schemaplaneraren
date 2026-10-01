@@ -43,6 +43,7 @@ type LunchRule = {
 type BusinessSettings = {
   days: Record<DayKey, BusinessDay>;
   lunch: LunchRule;
+  maxShiftHours: number;
 };
 
 type Project = {
@@ -64,6 +65,8 @@ type Assignment = {
   start: string;
   end: string;
   projectId?: string;
+  lunchStart?: string;
+  lunchEnd?: string;
   lunchMinutes?: number;
 };
 
@@ -100,11 +103,12 @@ const defaultBusiness: BusinessSettings = {
   },
   lunch: {
     enabled: true,
-    windowStart: '11:30',
-    windowEnd: '13:30',
+    windowStart: '12:00',
+    windowEnd: '12:30',
     durationMinutes: 30,
     paid: false,
   },
+  maxShiftHours: 9,
 };
 
 const initialProjects: Project[] = [
@@ -202,9 +206,21 @@ function weeklyTargetHours(employee: Employee) {
 
 function assignmentHours(a: Assignment, business: BusinessSettings) {
   let hours = hoursBetween(a.start, a.end);
-  const lunch = a.lunchMinutes ?? (business.lunch.enabled && !business.lunch.paid ? business.lunch.durationMinutes : 0);
-  hours -= lunch / 60;
+  const lunchMinutes = a.lunchMinutes ?? (
+    a.lunchStart && a.lunchEnd
+      ? Math.max(0, toMinutes(a.lunchEnd) - toMinutes(a.lunchStart))
+      : business.lunch.durationMinutes
+  );
+  if (business.lunch.enabled && !business.lunch.paid) hours -= lunchMinutes / 60;
   return Math.max(0, hours);
+}
+
+function assignmentLunch(a: Assignment, business: BusinessSettings) {
+  if (!business.lunch.enabled) return null;
+  const start = a.lunchStart ?? business.lunch.windowStart;
+  const end = a.lunchEnd ?? business.lunch.windowEnd;
+  if (toMinutes(end) <= toMinutes(a.start) || toMinutes(start) >= toMinutes(a.end)) return null;
+  return { start, end };
 }
 
 function DraggableEmployee({ employee }: { employee: Employee }) {
@@ -273,6 +289,9 @@ function ScheduleCell({
             >
               <span className="shift-topline"><strong>{employee.name}</strong><span>{assignmentHours(a, business).toFixed(1)} h</span></span>
               <span>{a.start}–{a.end}{project ? ` · ${project.name}` : ''}</span>
+              {assignmentLunch(a, business) && (
+                <span className="lunch-line">🍽 Lunch {assignmentLunch(a, business)!.start}–{assignmentLunch(a, business)!.end}</span>
+              )}
               <span className="shift-actions" onClick={(e) => e.stopPropagation()}>
                 <span className="mini-link" onClick={() => onRemove(a.employeeId, a.date)}>Ta bort</span>
               </span>
@@ -418,7 +437,16 @@ function App() {
     const clippedEnd = toMinutes(end) > toMinutes(businessDay.end) ? businessDay.end : end;
     setAssignments((current) => {
       const withoutDuplicate = current.filter((a) => !(a.employeeId === employeeId && a.date === dateKey));
-      return [...withoutDuplicate, { employeeId, date: dateKey, start: clippedStart, end: clippedEnd, projectId: project?.id }];
+      return [...withoutDuplicate, {
+        employeeId,
+        date: dateKey,
+        start: clippedStart,
+        end: clippedEnd,
+        projectId: project?.id,
+        lunchStart: business.lunch.windowStart,
+        lunchEnd: business.lunch.windowEnd,
+        lunchMinutes: business.lunch.durationMinutes,
+      }];
     });
     setMessage(`${employee.name} lades till ${dateKey}, ${clippedStart}–${clippedEnd}.`);
   }
@@ -483,6 +511,9 @@ function App() {
       const maxDay = text.match(/max(?:imalt)?\s+(\d+(?:[.,]\d+)?)\s+timmar\s+(?:per|om)\s+dag/);
       if (maxDay) { next.maxHoursDay = Number(maxDay[1].replace(',', '.')); changed = true; }
 
+      const maxPassPerson = text.match(/(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/);
+      if (maxPassPerson) { next.maxHoursDay = Number(maxPassPerson[1].replace(',', '.')); changed = true; }
+
       if (changed) {
         setEmployees((current) => current.map((e) => e.id === employee.id ? next : e));
         setSelectedEmployeeId(employee.id);
@@ -490,9 +521,35 @@ function App() {
       }
     }
 
+    const lunchTime = text.match(/lunch(?:en)?\s+(?:är\s+|ska\s+vara\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till)\s*(\d{1,2})(?::(\d{2}))?/);
+    if (lunchTime) {
+      const start = `${String(Number(lunchTime[1])).padStart(2, '0')}:${lunchTime[2] ?? '00'}`;
+      const end = `${String(Number(lunchTime[3])).padStart(2, '0')}:${lunchTime[4] ?? '00'}`;
+      const durationMinutes = Math.max(0, toMinutes(end) - toMinutes(start));
+      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: true, windowStart: start, windowEnd: end, durationMinutes } }));
+      changed = true;
+      setSidebarTab('business');
+    }
+
     const lunch = text.match(/lunch(?:en)?\s+(?:är\s+)?(\d{1,3})\s*min/);
     if (lunch) {
-      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: true, durationMinutes: Number(lunch[1]) } }));
+      const durationMinutes = Number(lunch[1]);
+      setBusiness((current) => ({
+        ...current,
+        lunch: {
+          ...current.lunch,
+          enabled: true,
+          durationMinutes,
+          windowEnd: addMinutesTime(current.lunch.windowStart, durationMinutes),
+        },
+      }));
+      changed = true;
+      setSidebarTab('business');
+    }
+
+    const globalMaxPass = text.match(/(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/);
+    if (globalMaxPass && !employee) {
+      setBusiness((current) => ({ ...current, maxShiftHours: Number(globalMaxPass[1].replace(',', '.')) }));
       changed = true;
       setSidebarTab('business');
     }
@@ -551,6 +608,14 @@ function App() {
         if (toMinutes(start) < toMinutes(businessDay.start)) start = businessDay.start;
         if (toMinutes(end) > toMinutes(businessDay.end)) end = businessDay.end;
 
+        const maxShiftHours = Math.min(
+          business.maxShiftHours,
+          employee.maxHoursDay,
+          project?.maxShiftHours ?? Number.POSITIVE_INFINITY,
+        );
+        const latestAllowedEnd = addMinutesTime(start, Math.round(maxShiftHours * 60));
+        if (toMinutes(end) > toMinutes(latestAllowedEnd)) end = latestAllowedEnd;
+
         const previousDate = localDateKey(addDays(date, -1));
         const wouldOpen = start === businessDay.start;
         const wouldClose = end === businessDay.end;
@@ -561,7 +626,16 @@ function App() {
           end = addMinutesTime(end, -60);
         }
 
-        additions.push({ employeeId: employee.id, date: dateKey, start, end, projectId: project?.id });
+        additions.push({
+          employeeId: employee.id,
+          date: dateKey,
+          start,
+          end,
+          projectId: project?.id,
+          lunchStart: business.lunch.windowStart,
+          lunchEnd: business.lunch.windowEnd,
+          lunchMinutes: business.lunch.durationMinutes,
+        });
         if (start === businessDay.start) { openingCount[employee.id] += 1; lastOpenDate[employee.id] = dateKey; }
         if (end === businessDay.end) { closingCount[employee.id] += 1; lastCloseDate[employee.id] = dateKey; }
       });
@@ -582,7 +656,7 @@ function App() {
       <div className="app-shell">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Schemaplaneraren v0.2</p>
+            <p className="eyebrow">Schemaplaneraren v0.3</p>
             <h1>Planera smartare – med regler</h1>
           </div>
           <div className="view-switcher" role="group" aria-label="Välj vy">
@@ -597,7 +671,7 @@ function App() {
         <section className="prompt-panel">
           <div>
             <strong>Skriv en regel</strong>
-            <span>Exempel: “Anna bör inte öppna två dagar i rad”, “öppet onsdag 07-19” eller “lunch 45 min”</span>
+            <span>Exempel: “Anna max pass 7,5 timmar”, “maxlängd pass 8 timmar”, “lunch 12-12:30” eller “öppet onsdag 07-19”</span>
           </div>
           <div className="prompt-row">
             <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && parsePrompt()} placeholder="Skriv en instruktion…" />
@@ -680,6 +754,10 @@ function App() {
                     </div>;
                   })}
                 </div>
+                <div className="subsection"><strong>Passregler</strong>
+                  <label>Maxlängd på pass (h)<input type="number" min="1" step="0.5" value={business.maxShiftHours} onChange={(e) => setBusiness((b) => ({ ...b, maxShiftHours: Number(e.target.value) }))} /></label>
+                  <span className="field-help">Gäller som övergripande max. Person- och projektgränser kan vara lägre.</span>
+                </div>
                 <div className="subsection"><strong>Lunch</strong>
                   <label className="check-row"><input type="checkbox" checked={business.lunch.enabled} onChange={(e) => setBusiness((b) => ({ ...b, lunch: { ...b.lunch, enabled: e.target.checked } }))} /> Använd lunchregel</label>
                   <div className="two-cols">
@@ -745,13 +823,24 @@ function App() {
               <div className="section-title"><div><strong>Redigera pass</strong><span>{employees.find((e) => e.id === editingAssignment.employeeId)?.name} · {editingAssignment.date}</span></div><button className="icon-button" onClick={() => setEditingAssignment(null)}>×</button></div>
               <div className="two-cols"><label>Start<input type="time" value={editingAssignment.start} onChange={(e) => setEditingAssignment({ ...editingAssignment, start: e.target.value })} /></label><label>Slut<input type="time" value={editingAssignment.end} onChange={(e) => setEditingAssignment({ ...editingAssignment, end: e.target.value })} /></label></div>
               <label>Projekt<select value={editingAssignment.projectId ?? ''} onChange={(e) => setEditingAssignment({ ...editingAssignment, projectId: e.target.value || undefined })}><option value="">Inget projekt</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-              <label>Lunch (min)<input type="number" min="0" step="5" value={editingAssignment.lunchMinutes ?? business.lunch.durationMinutes} onChange={(e) => setEditingAssignment({ ...editingAssignment, lunchMinutes: Number(e.target.value) })} /></label>
+              <div className="two-cols">
+                <label>Lunch från<input type="time" value={editingAssignment.lunchStart ?? business.lunch.windowStart} onChange={(e) => {
+                  const lunchStart = e.target.value;
+                  const lunchEnd = editingAssignment.lunchEnd ?? business.lunch.windowEnd;
+                  setEditingAssignment({ ...editingAssignment, lunchStart, lunchMinutes: Math.max(0, toMinutes(lunchEnd) - toMinutes(lunchStart)) });
+                }} /></label>
+                <label>Lunch till<input type="time" value={editingAssignment.lunchEnd ?? business.lunch.windowEnd} onChange={(e) => {
+                  const lunchEnd = e.target.value;
+                  const lunchStart = editingAssignment.lunchStart ?? business.lunch.windowStart;
+                  setEditingAssignment({ ...editingAssignment, lunchEnd, lunchMinutes: Math.max(0, toMinutes(lunchEnd) - toMinutes(lunchStart)) });
+                }} /></label>
+              </div>
               <div className="modal-actions"><button className="secondary" onClick={() => setEditingAssignment(null)}>Avbryt</button><button className="primary" onClick={saveEditedAssignment}>Spara pass</button></div>
             </div>
           </div>
         )}
 
-        <footer>Sparas automatiskt lokalt i webbläsaren. v0.2 innehåller öppettider, lunch, projekt, passregler och schemavalidering.</footer>
+        <footer>Sparas automatiskt lokalt i webbläsaren. v0.3 visar lunch i schemat och stödjer maxlängd på pass via inställning och prompt.</footer>
       </div>
     </DragDropProvider>
   );
@@ -776,6 +865,8 @@ function validateSchedule(assignments: Assignment[], employees: Employee[], busi
     const dayKey = getDayKey(date);
     const bday = business.days[dayKey];
     const hours = assignmentHours(assignment, business);
+    const grossShiftHours = hoursBetween(assignment.start, assignment.end);
+    if (grossShiftHours > business.maxShiftHours + 0.01) items.push({ level: 'warning', text: `${employee.name}s pass ${assignment.date} är ${grossShiftHours.toFixed(1)} h långt, över global maxlängd ${business.maxShiftHours} h.` });
     if (!bday.open) items.push({ level: 'error', text: `${employee.name} är schemalagd ${DAY_LABELS[dayKey]} trots att verksamheten är stängd.` });
     if (!employee.days[dayKey]) items.push({ level: 'error', text: `${employee.name} är schemalagd ${DAY_LABELS[dayKey]} trots att dagen är markerad som ledig.` });
     if (hours > employee.maxHoursDay + 0.01) items.push({ level: 'warning', text: `${employee.name} har ${hours.toFixed(1)} h ${assignment.date}, över max ${employee.maxHoursDay} h.` });
