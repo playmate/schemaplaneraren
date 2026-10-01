@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.38';
+const APP_VERSION = '0.1.39';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -534,31 +534,22 @@ function getEmptySlotSuggestion(
 }
 
 const defaultStaff: Staff[] = [
-  {
-    id: 'anna',
-    name: 'Anna',
-    color: COLORS[0],
-    days: { mon: true, tue: true, wed: true, thu: true, fri: true },
-    workTimes: defaultWorkTimes(),
-    blockedTimes: defaultBlockedTimes(),
-  },
-  {
-    id: 'erik',
-    name: 'Erik',
-    color: COLORS[1],
-    days: { mon: true, tue: true, wed: true, thu: true, fri: true },
-    workTimes: defaultWorkTimes(),
-    blockedTimes: defaultBlockedTimes(),
-  },
-  {
-    id: 'sara',
-    name: 'Sara',
-    color: COLORS[2],
-    days: { mon: true, tue: true, wed: true, thu: true, fri: true },
-    workTimes: defaultWorkTimes(),
-    blockedTimes: defaultBlockedTimes(),
-  },
-];
+  ['anna', 'Anna', COLORS[0]],
+  ['erik', 'Erik', COLORS[1]],
+  ['kalle', 'Kalle', COLORS[2]],
+  ['hannes', 'Hannes', COLORS[3]],
+  ['cissi', 'Cissi', COLORS[4]],
+  ['amanda', 'Amanda', COLORS[5]],
+  ['ester', 'Ester', COLORS[6]],
+  ['person-8', 'Person 8', COLORS[7]],
+].map(([id, name, color]) => ({
+  id,
+  name,
+  color,
+  days: { mon: true, tue: true, wed: true, thu: true, fri: true },
+  workTimes: defaultWorkTimes(),
+  blockedTimes: defaultBlockedTimes(),
+}));
 
 function localDateKey(date: Date) {
   const y = date.getFullYear();
@@ -3099,6 +3090,44 @@ export default function App() {
     setMessage('Prova t.ex. “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag” eller “rensa schema”.');
   }
 
+  function resetStaffSettings() {
+    const confirmed = window.confirm(
+      'Återställ personal?\n\nAlla ändringar i Personal återställs till standard: 8 personer, standardnamn, färger, arbetsdagar, arbetstider och tidsbegränsningar. Scheman behålls där person-ID fortfarande matchar.'
+    );
+
+    if (!confirmed) {
+      setMessage('Återställningen av Personal avbröts.');
+      return;
+    }
+
+    const freshDefaults = defaultStaff.map((person) => ({
+      ...person,
+      days: { ...person.days },
+      workTimes: {
+        mon: { ...person.workTimes.mon },
+        tue: { ...person.workTimes.tue },
+        wed: { ...person.workTimes.wed },
+        thu: { ...person.workTimes.thu },
+        fri: { ...person.workTimes.fri },
+      },
+      blockedTimes: {
+        mon: [],
+        tue: [],
+        wed: [],
+        thu: [],
+        fri: [],
+      },
+    }));
+
+    const validIds = new Set(freshDefaults.map((person) => person.id));
+    setStaff(freshDefaults);
+    setAssignments((current) =>
+      current.filter((assignment) => validIds.has(assignment.employeeId))
+    );
+    setSelectedStaffId(null);
+    setMessage('Personal återställdes till 8 standardpersoner.');
+  }
+
   function addStaff() {
     const usedNames = new Set(
       staff.map((person) => person.name.trim().toLocaleLowerCase('sv-SE'))
@@ -3647,7 +3676,10 @@ export default function App() {
                 <h2>Personal</h2>
                 <p>Klicka på en person för att redigera namn, arbetsdagar och arbetstider.</p>
               </div>
-              <button className="primary" onClick={addStaff}>+ Lägg till person</button>
+              <div className="staff-settings-actions">
+                <button className="reset-staff-button" onClick={resetStaffSettings}>Återställ personal</button>
+                <button className="primary" onClick={addStaff}>+ Lägg till person</button>
+              </div>
             </div>
 
             <div className="staff-settings-list">
