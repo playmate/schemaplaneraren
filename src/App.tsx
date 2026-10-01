@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.36';
+const APP_VERSION = '0.1.37';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1787,8 +1787,21 @@ export default function App() {
     const assignedMinutes: Record<string, number> = Object.fromEntries(
       staffSource.map((person) => [person.id, 0])
     );
+    const openingCounts: Record<string, number> = Object.fromEntries(
+      staffSource.map((person) => [
+        person.id,
+        monthHistory.filter(
+          (item) => item.employeeId === person.id && item.start === WORK_START
+        ).length,
+      ])
+    );
     const closingCounts: Record<string, number> = Object.fromEntries(
-      staffSource.map((person) => [person.id, 0])
+      staffSource.map((person) => [
+        person.id,
+        monthHistory.filter(
+          (item) => item.employeeId === person.id && item.end === WORK_END
+        ).length,
+      ])
     );
     const lastClosingDate: Record<string, string | undefined> = {};
     const coverageGaps: string[] = [];
@@ -1839,8 +1852,11 @@ export default function App() {
             const closeThenOpenPenalty =
               isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
 
+            const openingLoadPenalty =
+              isOpeningShift ? (openingCounts[person.id] ?? 0) * 32000 : 0;
+
             const closingLoadPenalty =
-              isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
+              isClosingShift ? (closingCounts[person.id] ?? 0) * 32000 : 0;
 
             const sameSlotThisMonth = monthHistory.filter(
               (item) =>
@@ -1871,6 +1887,7 @@ export default function App() {
                 fairnessScore +
                 consecutiveClosePenalty +
                 closeThenOpenPenalty +
+                openingLoadPenalty +
                 closingLoadPenalty +
                 monthlyRotationPenalty,
             };
@@ -1891,6 +1908,14 @@ export default function App() {
           assignedMinutes[chosen.id] =
             (assignedMinutes[chosen.id] ?? 0) +
             netWorkMinutes(slotStartTime, actualEndTime);
+
+          if (isOpeningShift) {
+            openingCounts[chosen.id] = (openingCounts[chosen.id] ?? 0) + 1;
+          }
+
+          if (isOpeningShift) {
+            openingCounts[chosen.id] = (openingCounts[chosen.id] ?? 0) + 1;
+          }
 
           if (isClosingShift) {
             closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
@@ -1921,7 +1946,7 @@ export default function App() {
       setMessage(
         reason
           ? `${reason} Schemat genererades om automatiskt.`
-          : `Schemat skapades med jämn fördelning och försöker variera passen mellan veckorna inom månaden.`
+          : `Schemat skapades med jämn fördelning av timmar, morgonpass och avslutande pass samt variation mellan veckorna inom månaden.`
       );
     }
   }
@@ -1941,6 +1966,9 @@ export default function App() {
     const monthKeys = monthDates.map(localDateKey);
     const generated: Assignment[] = [];
     const assignedMinutes: Record<string, number> = Object.fromEntries(
+      staff.map((person) => [person.id, 0])
+    );
+    const openingCounts: Record<string, number> = Object.fromEntries(
       staff.map((person) => [person.id, 0])
     );
     const closingCounts: Record<string, number> = Object.fromEntries(
@@ -1996,8 +2024,11 @@ export default function App() {
             const closeThenOpenPenalty =
               isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
 
+            const openingLoadPenalty =
+              isOpeningShift ? (openingCounts[person.id] ?? 0) * 32000 : 0;
+
             const closingLoadPenalty =
-              isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
+              isClosingShift ? (closingCounts[person.id] ?? 0) * 32000 : 0;
 
             const sameSlotEarlierThisMonth = generated.filter((assignment) => {
               if (assignment.employeeId !== person.id) return false;
@@ -2031,6 +2062,7 @@ export default function App() {
                 fairnessScore +
                 consecutiveClosePenalty +
                 closeThenOpenPenalty +
+                openingLoadPenalty +
                 closingLoadPenalty +
                 monthlyRotationPenalty,
             };
@@ -2076,7 +2108,7 @@ export default function App() {
     setMessage(
       coverageGaps.length
         ? `Månadsschemat skapades för ${selectedMonthLabel}, men ${coverageGaps.length} pass saknar tillgänglig personal.`
-        : `Månadsschemat skapades för ${selectedMonthLabel} med jämn fördelning och variation mellan veckorna.`
+        : `Månadsschemat skapades för ${selectedMonthLabel} med jämnare fördelning av timmar, morgonpass och avslutande pass.`
     );
   }
 
