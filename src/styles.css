@@ -267,6 +267,20 @@ input:focus {
   background: #0f172a;
 }
 
+.staff-chip-draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.staff-chip-draggable:active {
+  cursor: grabbing;
+}
+
+.staff-chip-draggable:hover {
+  border-color: #475569;
+  background: #111c2f;
+}
+
 .staff-chip strong,
 .staff-chip span,
 .staff-chip small {
@@ -291,6 +305,8 @@ input:focus {
   width: 32px;
   height: 32px;
   font-size: 17px;
+  display: grid;
+  place-items: center;
 }
 
 .schedule-panel {
@@ -472,6 +488,43 @@ input:focus {
   position: absolute;
   inset: 0;
   z-index: 2;
+}
+
+.empty-slot-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.empty-shift-drop-zone {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  border: 1px dashed #334155;
+  border-radius: 9px;
+  background: rgba(15,23,42,.22);
+  display: grid;
+  place-items: center;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  pointer-events: auto;
+}
+
+.empty-shift-drop-zone span {
+  opacity: .65;
+}
+
+.empty-shift-drop-zone.slot-drop-active {
+  border-color: #60a5fa;
+  background: rgba(37,99,235,.18);
+  color: #bfdbfe;
+  box-shadow: inset 0 0 0 1px rgba(96,165,250,.25);
+}
+
+.empty-shift-drop-zone.slot-drop-active span {
+  opacity: 1;
 }
 
 .assignment-card {
