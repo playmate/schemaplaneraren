@@ -628,6 +628,14 @@ input:focus {
   margin-bottom: 12px;
 }
 
+.schedule-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+
 .schedule-toolbar h2 {
   margin: 0;
   text-align: center;
@@ -1574,6 +1582,10 @@ input:focus {
 
   .schedule-toolbar h2 {
     text-align: left;
+  }
+
+  .schedule-create-actions {
+    justify-content: flex-start;
   }
 
   .settings-heading {
