@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri';
-type AppTab = 'schedule' | 'staff';
+type AppTab = 'schedule' | 'month' | 'staff';
 
 type WorkTime = {
   start: string;
@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.3';
+const APP_VERSION = '0.1.4';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -199,6 +199,29 @@ function addDays(date: Date, amount: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + amount);
   return copy;
+}
+
+function addMonths(date: Date, amount: number) {
+  const copy = new Date(date);
+  copy.setDate(1);
+  copy.setMonth(copy.getMonth() + amount);
+  return copy;
+}
+
+function monthWeekdays(date: Date) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const firstWeek = startOfWeek(first);
+  const weeks: Date[][] = [];
+
+  for (let weekStartDate = new Date(firstWeek); weekStartDate <= last; weekStartDate = addDays(weekStartDate, 7)) {
+    const days = DAY_KEYS.map((_, index) => addDays(weekStartDate, index));
+    if (days.some((day) => day.getMonth() === month)) weeks.push(days);
+  }
+
+  return weeks;
 }
 
 function getDayKey(date: Date): DayKey {
@@ -655,6 +678,8 @@ export default function App() {
     () => cursorDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' }),
     [cursorDate]
   );
+
+  const monthWeeks = useMemo(() => monthWeekdays(cursorDate), [cursorDate]);
 
   const hourImbalanceNote = useMemo(() => {
     if (staff.length < 2) return '';
@@ -2175,6 +2200,7 @@ export default function App() {
           </div>
           <nav className="tabs">
             <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}>Schema</button>
+            <button className={tab === 'month' ? 'active' : ''} onClick={() => setTab('month')}>Månad</button>
             <button className={tab === 'staff' ? 'active' : ''} onClick={() => setTab('staff')}>Personal</button>
           </nav>
         </header>
@@ -2293,6 +2319,96 @@ export default function App() {
                 <button className="reset-button" onClick={resetVisibleSchedule}>Nollställ schema</button>
               </div>
             </section>
+          </main>
+        )}
+
+        {tab === 'month' && (
+          <main className="month-view">
+            <div className="month-toolbar">
+              <div className="week-nav">
+                <button onClick={() => setCursorDate(addMonths(cursorDate, -1))}>←</button>
+                <button onClick={() => setCursorDate(new Date())}>Idag</button>
+                <button onClick={() => setCursorDate(addMonths(cursorDate, 1))}>→</button>
+              </div>
+              <div>
+                <h2>{selectedMonthLabel}</h2>
+                <span>Hela månadens schema, måndag–fredag</span>
+              </div>
+              <div className="month-total-chip">
+                <span>Totalt</span>
+                <strong>
+                  {Object.values(monthlyHoursByPerson).reduce((sum, hours) => sum + hours, 0).toFixed(1)} h
+                </strong>
+              </div>
+            </div>
+
+            <div className="month-weekday-header">
+              {DAY_KEYS.map((day) => <strong key={day}>{DAY_LABELS[day]}</strong>)}
+            </div>
+
+            <div className="month-grid">
+              {monthWeeks.flatMap((week, weekIndex) =>
+                week.map((date) => {
+                  const dateKey = localDateKey(date);
+                  const inMonth = date.getMonth() === cursorDate.getMonth();
+                  const dayAssignments = assignments
+                    .filter((assignment) => assignment.date === dateKey)
+                    .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+
+                  return (
+                    <section
+                      key={dateKey}
+                      className={`month-day ${inMonth ? '' : 'outside-month'}`}
+                    >
+                      <header>
+                        <span>v{getIsoWeek(date)}</span>
+                        <strong>{date.getDate()}</strong>
+                      </header>
+
+                      <div className="month-day-assignments">
+                        {dayAssignments.length === 0 ? (
+                          <span className="month-empty">Ej schemalagt</span>
+                        ) : (
+                          dayAssignments.map((assignment) => {
+                            const person = staff.find((item) => item.id === assignment.employeeId);
+                            if (!person) return null;
+
+                            return (
+                              <div
+                                className="month-assignment"
+                                key={assignment.id}
+                                style={{
+                                  borderLeftColor: person.color,
+                                  background: softColor(person.color, 0.2),
+                                }}
+                              >
+                                <strong>{person.name}</strong>
+                                <span>{assignment.start}–{assignment.end}</span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </section>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="month-hours-panel">
+              <div>
+                <strong>Timmar denna månad</strong>
+                <span>{selectedMonthLabel}</span>
+              </div>
+              <div className="month-hours-list">
+                {staff.map((person) => (
+                  <div key={person.id}>
+                    <span><i style={{ background: person.color }} />{person.name}</span>
+                    <strong>{(monthlyHoursByPerson[person.id] ?? 0).toFixed(1)} h</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
           </main>
         )}
 
