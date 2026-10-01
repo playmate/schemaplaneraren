@@ -419,6 +419,22 @@ input:focus {
   backdrop-filter: blur(4px);
 }
 
+.assignment-drag-area {
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+}
+
+.assignment-drag-area:active {
+  cursor: grabbing;
+}
+
+.assignment-drop-target {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 3px rgba(96,165,250,.18), 0 8px 18px rgba(0,0,0,.22);
+}
+
 .assignment-card strong {
   display: block;
   padding-right: 22px;
