@@ -808,20 +808,15 @@ export default function App() {
       return;
     }
 
-    const project = projects.find((p) => employee.projectIds.includes(p.id));
-
     let start = employee.overrides[day]?.start ?? employee.defaultStart;
     let end = employee.overrides[day]?.end ?? employee.defaultEnd;
 
     if (toMinutes(start) < toMinutes(businessDay.start)) start = businessDay.start;
     if (toMinutes(end) > toMinutes(businessDay.end)) end = businessDay.end;
 
-    const maxShiftHours = Math.min(
-      business.maxShiftHours,
-      employee.maxHoursDay,
-      project?.maxShiftHours ?? Number.POSITIVE_INFINITY
-    );
-
+    // Personalschemat är frikopplat från projektens passlängd.
+    // Ett projekt kan t.ex. ha maxpass 3 h utan att den anställdes vanliga arbetsdag kapas till 3 h.
+    const maxShiftHours = Math.min(business.maxShiftHours, employee.maxHoursDay);
     const latestAllowedEnd = addMinutesTime(start, Math.round(maxShiftHours * 60));
     if (toMinutes(end) > toMinutes(latestAllowedEnd)) end = latestAllowedEnd;
 
@@ -834,7 +829,7 @@ export default function App() {
           date: dateKey,
           start,
           end,
-          projectId: project?.id,
+          projectId: undefined,
           lunchStart: business.lunch.windowStart,
           lunchEnd: business.lunch.windowEnd,
           lunchMinutes: business.lunch.durationMinutes,
@@ -1037,47 +1032,51 @@ export default function App() {
       const available = employees.filter((employee) => employee.days[day]);
       if (!available.length) continue;
 
-      const scored = available
-        .map((employee) => {
-          const target = weeklyTargetHours(employee);
-          const current = additions
-            .filter((a) => a.employeeId === employee.id)
-            .reduce((sum, a) => sum + assignmentHours(a, business), 0);
+      // Personalschemat ska lägga ut alla personer som faktiskt arbetar den dagen.
+      // Projektbemanning hanteras separat i fliken "Projekt / uppgifter".
+      const chosen = [...available].sort((a, b) => {
+        const aTarget = weeklyTargetHours(a);
+        const bTarget = weeklyTargetHours(b);
+        const aCurrent = additions
+          .filter((assignment) => assignment.employeeId === a.id)
+          .reduce((sum, assignment) => sum + assignmentHours(assignment, business), 0);
+        const bCurrent = additions
+          .filter((assignment) => assignment.employeeId === b.id)
+          .reduce((sum, assignment) => sum + assignmentHours(assignment, business), 0);
+        return (bTarget - bCurrent) - (aTarget - aCurrent);
+      });
 
-          const closePenalty =
-            employee.avoidConsecutiveClose && lastCloseDate[employee.id] === localDateKey(addDays(date, -1))
-              ? 100
-              : 0;
-
-          return { employee, score: target - current - closePenalty };
-        })
-        .sort((a, b) => b.score - a.score);
-
-      const desired = Math.min(Math.max(...projects.map((p) => p.desiredStaff), 1), scored.length);
-      const chosen = scored.slice(0, desired);
-
-      chosen.forEach(({ employee }) => {
-        const project = projects.find((p) => employee.projectIds.includes(p.id));
+      chosen.forEach((employee) => {
         let start = employee.overrides[day]?.start ?? employee.defaultStart;
         let end = employee.overrides[day]?.end ?? employee.defaultEnd;
 
         if (toMinutes(start) < toMinutes(businessDay.start)) start = businessDay.start;
         if (toMinutes(end) > toMinutes(businessDay.end)) end = businessDay.end;
 
-        const maxShiftHours = Math.min(
-          business.maxShiftHours,
-          employee.maxHoursDay,
-          project?.maxShiftHours ?? Number.POSITIVE_INFINITY
-        );
+        // Viktigt: projektens maxpass (t.ex. 3 h) gäller bara projekt-/uppgiftspass.
+        // Vanliga personalpass begränsas endast av verksamhetens och personens maxlängd.
+        const maxShiftHours = Math.min(business.maxShiftHours, employee.maxHoursDay);
         const latestAllowedEnd = addMinutesTime(start, Math.round(maxShiftHours * 60));
         if (toMinutes(end) > toMinutes(latestAllowedEnd)) end = latestAllowedEnd;
+
+        // Försök undvika avslutande pass två vardagar i rad när det finns utrymme.
+        const previousDate = localDateKey(addDays(date, -1));
+        const wouldClose = end === businessDay.end;
+        if (
+          wouldClose &&
+          employee.avoidConsecutiveClose &&
+          lastCloseDate[employee.id] === previousDate &&
+          toMinutes(end) - toMinutes(start) >= 120
+        ) {
+          end = addMinutesTime(end, -30);
+        }
 
         additions.push({
           employeeId: employee.id,
           date: dateKey,
           start,
           end,
-          projectId: project?.id,
+          projectId: undefined,
           lunchStart: business.lunch.windowStart,
           lunchEnd: business.lunch.windowEnd,
           lunchMinutes: business.lunch.durationMinutes,
@@ -1233,7 +1232,7 @@ export default function App() {
       <div className="app-shell">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Schemaplaneraren v0.5</p>
+            <p className="eyebrow">Schemaplaneraren v0.6</p>
             <h1>Planera smartare – nu med riktig tidslinje</h1>
           </div>
 
@@ -1996,8 +1995,8 @@ export default function App() {
         )}
 
         <footer>
-          Sparas automatiskt lokalt i webbläsaren. v0.5 har tidslinje med timindelning, tydligare passlängder,
-          vardagsschema och separat projekt-/uppgiftsvy.
+          Sparas automatiskt lokalt i webbläsaren. v0.6 skiljer på vanliga personalpass och korta projektpass:
+          projektets maxpass påverkar inte längre den anställdes vanliga arbetsdag.
         </footer>
       </div>
     </DragDropProvider>
