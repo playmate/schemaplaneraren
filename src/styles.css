@@ -594,6 +594,24 @@ select:focus {
   z-index: 1;
 }
 
+.timeline-lunch-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(148, 163, 184, 0.28);
+  border-top: 1px dashed #94a3b8;
+  border-bottom: 1px dashed #94a3b8;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  z-index: 2;
+  pointer-events: none;
+  letter-spacing: .02em;
+}
+
 .time-label-row {
   position: absolute;
   left: 0;
@@ -724,6 +742,18 @@ select:focus {
   color: #dc2626;
   font-size: 12px;
   font-weight: 700;
+}
+
+.project-block {
+  min-width: 0;
+}
+
+.project-block .timeline-shift-top,
+.project-block .timeline-shift-time,
+.project-block .timeline-shift-project {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .project-block.unassigned {
