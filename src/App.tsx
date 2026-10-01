@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.29';
+const APP_VERSION = '0.1.30';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -214,6 +214,14 @@ function weeklyBalanceScore(
   const average = values.reduce((sum, value) => sum + value, 0) / values.length;
 
   return values.reduce((sum, value) => sum + Math.pow(value - average, 2), 0);
+}
+
+function warningSeverity(warnings: string[]) {
+  const reasons = warnings.filter((warning) => !warning.startsWith('Tips:'));
+  const hasHardWarning = reasons.some(
+    (warning) => !warning.startsWith('Många timmar denna vecka:')
+  );
+  return hasHardWarning ? 'danger' : 'notice';
 }
 
 function getAssignmentWarnings(
@@ -689,12 +697,14 @@ function DraggableAssignmentCard({
       </button>
       {warnings.length > 0 && (
         <span
-          className="assignment-warning"
+          className={`assignment-warning ${warningSeverity(warnings)}`}
           aria-label={`Varning: ${warnings.join(' ')}`}
          >
           <span className="assignment-warning-icon" aria-hidden="true">!</span>
           <span className="assignment-warning-tooltip" role="tooltip">
-            <span className="assignment-warning-title">Varning</span>
+            <span className="assignment-warning-title">
+              {warningSeverity(warnings) === 'danger' ? 'Varning' : 'Observera'}
+            </span>
             <span className="assignment-warning-reasons">
               {warnings
                 .filter((warning) => !warning.startsWith('Tips:'))
@@ -3255,17 +3265,58 @@ export default function App() {
                             if (!person) return null;
 
                             return (
-                              <div
-                                className="month-assignment"
-                                key={assignment.id}
-                                style={{
-                                  borderLeftColor: person.color,
-                                  background: softColor(person.color, 0.2),
-                                }}
-                              >
-                                <strong>{person.name}</strong>
-                                <span>{assignment.start}–{assignment.end}</span>
-                              </div>
+                              (() => {
+                                const assignmentWeekStart = startOfWeek(date);
+                                const assignmentWeekKeys = DAY_KEYS.map((_, index) =>
+                                  localDateKey(addDays(assignmentWeekStart, index))
+                                );
+                                const warnings = getAssignmentWarnings(
+                                  assignment,
+                                  person,
+                                  assignments,
+                                  assignmentWeekKeys,
+                                  staff
+                                );
+                                const severity = warningSeverity(warnings);
+
+                                return (
+                                  <div
+                                    className="month-assignment"
+                                    key={assignment.id}
+                                    style={{
+                                      borderLeftColor: person.color,
+                                      background: softColor(person.color, 0.2),
+                                    }}
+                                  >
+                                    <strong>{person.name}</strong>
+                                    <span>{assignment.start}–{assignment.end}</span>
+                                    {warnings.length > 0 && (
+                                      <span className={`month-assignment-warning ${severity}`}>
+                                        <span className="month-assignment-warning-icon" aria-hidden="true">!</span>
+                                        <span className="month-assignment-warning-tooltip" role="tooltip">
+                                          <span className="month-assignment-warning-title">
+                                            {severity === 'danger' ? 'Varning' : 'Observera'}
+                                          </span>
+                                          <span className="month-assignment-warning-reasons">
+                                            {warnings
+                                              .filter((warning) => !warning.startsWith('Tips:'))
+                                              .map((warning) => (
+                                                <span key={warning} className="month-assignment-warning-reason">
+                                                  {warning}
+                                                </span>
+                                              ))}
+                                          </span>
+                                          {warnings.some((warning) => warning.startsWith('Tips:')) && (
+                                            <span className="month-assignment-warning-tip">
+                                              {warnings.find((warning) => warning.startsWith('Tips:'))?.replace(/^Tips:\s*/, '')}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()
                             );
                           })
                         )}
