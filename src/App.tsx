@@ -169,8 +169,8 @@ const initialProjects: Project[] = [
     maxShiftHours: 3,
     minStaff: 1,
     desiredStaff: 1,
-    start: '07:00',
-    end: '17:00',
+    start: '08:00',
+    end: '16:30',
     color: '#2563eb',
   },
   {
@@ -182,7 +182,7 @@ const initialProjects: Project[] = [
     minStaff: 1,
     desiredStaff: 1,
     start: '08:00',
-    end: '17:00',
+    end: '16:30',
     color: '#7c3aed',
   },
 ];
@@ -762,12 +762,12 @@ export default function App() {
   const employeeWeekHours = useMemo(() => {
     const result: Record<string, number> = {};
     for (const employee of employees) {
-      result[employee.id] = assignments
-        .filter((a) => a.employeeId === employee.id && weekDateKeys.includes(a.date))
-        .reduce((sum, a) => sum + assignmentHours(a, business), 0);
+      result[employee.id] = taskAssignments
+        .filter((task) => task.employeeId === employee.id && weekDateKeys.includes(task.date))
+        .reduce((sum, task) => sum + hoursBetween(task.start, task.end), 0);
     }
     return result;
-  }, [assignments, business, employees, weekDateKeys]);
+  }, [taskAssignments, employees, weekDateKeys]);
 
   const validations = useMemo(
     () => validateSchedule(assignments, taskAssignments, employees, business, projects, weekDates, selectedProject),
@@ -1358,20 +1358,24 @@ export default function App() {
           })
           .sort((a, b) => a.score - b.score || a.employee.name.localeCompare(b.employee.name, 'sv'));
 
-        const chosen = scored[0]?.employee ?? null;
+        const requiredStaff = Math.max(1, business.staffAtSameTime ?? 1);
+        const chosenWorkers = scored.slice(0, requiredStaff).map((entry) => entry.employee);
 
-        generated.push({
-          id: `${selectedProject.id}-${dateKey}-${slotIndex}`,
-          projectId: selectedProject.id,
-          employeeId: chosen?.id ?? null,
-          date: dateKey,
-          start,
-          end,
-        });
+        for (let staffIndex = 0; staffIndex < requiredStaff; staffIndex++) {
+          const chosen = chosenWorkers[staffIndex] ?? null;
+          generated.push({
+            id: `${selectedProject.id}-${dateKey}-${slotIndex}-${staffIndex}`,
+            projectId: selectedProject.id,
+            employeeId: chosen?.id ?? null,
+            date: dateKey,
+            start,
+            end,
+          });
 
-        if (chosen) {
-          assignedMinutes[chosen.id] = (assignedMinutes[chosen.id] ?? 0) + (slotEnd - slotStart);
-          if (isClosingSlot) closingCount[chosen.id] = (closingCount[chosen.id] ?? 0) + 1;
+          if (chosen) {
+            assignedMinutes[chosen.id] = (assignedMinutes[chosen.id] ?? 0) + (slotEnd - slotStart);
+            if (isClosingSlot) closingCount[chosen.id] = (closingCount[chosen.id] ?? 0) + 1;
+          }
         }
 
         slotStart = slotEnd;
@@ -1384,7 +1388,7 @@ export default function App() {
 
     setTaskAssignments([...keepOtherProjects, ...generated]);
     setScheduleMode('project');
-    setMessage(`Projektpassen för ${selectedProject.name} fördelades så jämnt som möjligt utan överlappning.`);
+    setMessage(`Schemat för ${selectedProject.name} genererades med ${Math.max(1, business.staffAtSameTime ?? 1)} person${Math.max(1, business.staffAtSameTime ?? 1) === 1 ? '' : 'er'} samtidigt, utan dubbelbokning.`);
   }
 
   const periodTitle =
@@ -1401,7 +1405,7 @@ export default function App() {
           <div>
             <strong>Skriv en regel</strong>
             <span>
-              Exempel: “skapa schema”, “full schema”, “Erik sjuk måndag”, “2 personal samtidigt”, “lunch 12-12:30”
+              Exempel: “skapa schema”, “Erik sjuk måndag”, “Anna VAB tisdag”, “Sara semester onsdag-fredag”, “2 personal samtidigt”, “Reception maxpass 3 timmar”, “lunch 12-12:30”
             </span>
           </div>
 
@@ -1966,52 +1970,21 @@ export default function App() {
                   <button onClick={() => navigate(1)}>→</button>
                 </div>
 
-                <h2>{scheduleMode === 'staff' ? periodTitle : `${selectedProject?.name ?? 'Projekt'} · ${periodTitle}`}</h2>
+                <h2>{`${selectedProject?.name ?? 'Projekt'} · ${periodTitle}`}</h2>
 
-                {scheduleMode === 'staff' ? (
-                  <button className="secondary" onClick={autoFillVisible}>
-                    Fyll personalschema
-                  </button>
-                ) : (
-                  <button className="secondary" onClick={generateProjectSchedule} disabled={!selectedProject}>
-                    Fördela projektpass
-                  </button>
-                )}
+                <button className="secondary" onClick={generateProjectSchedule} disabled={!selectedProject}>
+                  Generera schema
+                </button>
               </div>
 
-              {scheduleMode === 'staff' ? (
-                <div className={`timeline-board ${view}`}>
-                  <TimeColumn marks={timeMarks} startMin={startMin} endMin={endMin} pixelsPerMinute={pixelsPerMinute} />
-
-                  {visibleDates.map((date) => {
-                    const key = localDateKey(date);
-                    const dayAssignments = assignments.filter((a) => a.date === key);
-                    return (
-                      <StaffTimelineDay
-                        key={key}
-                        date={date}
-                        assignments={dayAssignments}
-                        employees={employees}
-                        projects={projects}
-                        business={business}
-                        startMin={startMin}
-                        endMin={endMin}
-                        pixelsPerMinute={pixelsPerMinute}
-                        onRemove={removeAssignment}
-                        onEdit={setEditingAssignment}
-                        absences={absences}
-                      />
-                    );
-                  })}
-                </div>
-              ) : selectedProject ? (
+              {selectedProject ? (
                 <>
                   <div className="project-schedule-summary">
-                    <span>
-                      Maxpass <strong>{selectedProject.maxShiftHours} h</strong>
-                    </span>
+                    <span>Arbetsdag <strong>08:00–16:30</strong></span>
+                    <span>Maxpass <strong>{selectedProject.maxShiftHours} h</strong></span>
+                    <span>Bemanning <strong>{Math.max(1, business.staffAtSameTime ?? 1)}</strong> samtidigt</span>
                     <span>Ingen dubbelbokning</span>
-                    <span>Jämn fördelning prioriteras</span>
+                    <span>Jämn fördelning</span>
                     <span>Helger dolda</span>
                   </div>
 
@@ -2028,6 +2001,8 @@ export default function App() {
                         startMin={startMin}
                         endMin={endMin}
                         pixelsPerMinute={pixelsPerMinute}
+                        business={business}
+                        absences={absences}
                       />
                     ))}
                   </div>
@@ -2164,8 +2139,8 @@ export default function App() {
         )}
 
         <footer>
-          Sparas automatiskt lokalt i webbläsaren. v0.7 har Schema som standardflik, promptstyrd schemagenerering,
-          sjukfrånvaro via prompt och inställning för antal personer som ska arbeta samtidigt.
+          Sparas automatiskt lokalt i webbläsaren. v0.8 visar endast projektschemat, har standarddag 08:00–16:30,
+          utgråad lunch, bredare promptstöd och stöd för flera personer samtidigt.
         </footer>
       </div>
     </DragDropProvider>
