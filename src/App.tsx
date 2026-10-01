@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.32';
+const APP_VERSION = '0.1.33';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -222,6 +222,21 @@ function warningSeverity(warnings: string[]) {
     (warning) => !warning.startsWith('Många timmar denna vecka:')
   );
   return hasHardWarning ? 'danger' : 'notice';
+}
+
+function warningKind(warnings: string[]) {
+  const reasons = warnings.filter((warning) => !warning.startsWith('Tips:'));
+  const onlyHourBalance =
+    reasons.length > 0 &&
+    reasons.every((warning) => warning.startsWith('Många timmar denna vecka:'));
+  const hasUsefulSuggestion = warnings.some(
+    (warning) =>
+      warning.startsWith('Tips:') &&
+      !warning.includes('inget bättre byte hittades') &&
+      !warning.includes('Inget bättre byte hittades')
+  );
+
+  return onlyHourBalance && !hasUsefulSuggestion ? 'hours' : warningSeverity(warnings);
 }
 
 function getAssignmentWarnings(
@@ -697,13 +712,19 @@ function DraggableAssignmentCard({
       </button>
       {warnings.length > 0 && (
         <span
-          className={`assignment-warning ${warningSeverity(warnings)}`}
+          className={`assignment-warning ${warningKind(warnings)}`}
           aria-label={`Varning: ${warnings.join(' ')}`}
          >
-          <span className="assignment-warning-icon" aria-hidden="true">!</span>
+          <span className="assignment-warning-icon" aria-hidden="true">
+            {warningKind(warnings) === 'hours' ? '⌛' : '!'}
+          </span>
           <span className="assignment-warning-tooltip" role="tooltip">
             <span className="assignment-warning-title">
-              {warningSeverity(warnings) === 'danger' ? 'Varning' : 'Observera'}
+              {warningKind(warnings) === 'danger'
+                ? 'Varning'
+                : warningKind(warnings) === 'hours'
+                  ? 'Timfördelning'
+                  : 'Observera'}
             </span>
             <span className="assignment-warning-reasons">
               {warnings
@@ -3291,7 +3312,7 @@ export default function App() {
                                   assignmentWeekKeys,
                                   staff
                                 );
-                                const severity = warningSeverity(warnings);
+                                const severity = warningKind(warnings);
 
                                 return (
                                   <div
@@ -3309,10 +3330,16 @@ export default function App() {
                                         className={`month-assignment-warning ${severity}`}
                                         onClick={(event) => event.stopPropagation()}
                                       >
-                                        <span className="month-assignment-warning-icon" aria-hidden="true">!</span>
+                                        <span className="month-assignment-warning-icon" aria-hidden="true">
+                                          {severity === 'hours' ? '⌛' : '!'}
+                                        </span>
                                         <span className="month-assignment-warning-tooltip" role="tooltip">
                                           <span className="month-assignment-warning-title">
-                                            {severity === 'danger' ? 'Varning' : 'Observera'}
+                                            {severity === 'danger'
+                                              ? 'Varning'
+                                              : severity === 'hours'
+                                                ? 'Timfördelning'
+                                                : 'Observera'}
                                           </span>
                                           <span className="month-assignment-warning-reasons">
                                             {warnings
