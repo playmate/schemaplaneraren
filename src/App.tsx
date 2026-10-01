@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.18';
+const APP_VERSION = '0.1.19';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -154,6 +154,18 @@ function softColor(hex: string, alpha = 0.24) {
   const g = parseInt(full.slice(2, 4), 16);
   const b = parseInt(full.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function weeklyBalanceScore(
+  totals: Record<string, number>,
+  allStaff: Staff[]
+) {
+  if (allStaff.length === 0) return 0;
+
+  const values = allStaff.map((person) => totals[person.id] ?? 0);
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+
+  return values.reduce((sum, value) => sum + Math.pow(value - average, 2), 0);
 }
 
 function getAssignmentWarnings(
@@ -307,27 +319,39 @@ function getAssignmentWarnings(
           boundaryPenalty += 2;
         }
 
-        const projectedWeeklyHours =
-          (weeklyTotals[candidate.id] ?? 0) + replacementMinutes;
+        const projectedTotals = { ...weeklyTotals };
+        projectedTotals[person.id] = Math.max(
+          0,
+          (projectedTotals[person.id] ?? 0) - replacementMinutes
+        );
+        projectedTotals[candidate.id] =
+          (projectedTotals[candidate.id] ?? 0) + replacementMinutes;
 
         return {
           candidate,
           boundaryPenalty,
-          projectedWeeklyHours,
+          projectedWeeklyHours: projectedTotals[candidate.id] ?? 0,
+          balanceScore: weeklyBalanceScore(projectedTotals, allStaff),
         };
       })
       .sort(
         (a, b) =>
           a.boundaryPenalty - b.boundaryPenalty ||
+          a.balanceScore - b.balanceScore ||
           a.projectedWeeklyHours - b.projectedWeeklyHours ||
           a.candidate.name.localeCompare(b.candidate.name, 'sv')
       );
 
     const bestAlternative = alternatives[0];
+    const currentBalanceScore = weeklyBalanceScore(weeklyTotals, allStaff);
 
-    if (bestAlternative && bestAlternative.boundaryPenalty === 0) {
+    if (
+      bestAlternative &&
+      bestAlternative.boundaryPenalty === 0 &&
+      bestAlternative.balanceScore < currentBalanceScore - 0.01
+    ) {
       uniqueWarnings.push(
-        `Tips: ersätt passet med ${bestAlternative.candidate.name}.`
+        `Tips: ersätt passet med ${bestAlternative.candidate.name} för en jämnare timfördelning.`
       );
     }
   }
@@ -407,15 +431,21 @@ function getEmptySlotSuggestion(
         boundaryPenalty += 2;
       }
 
+      const projectedTotals = { ...weeklyTotals };
+      projectedTotals[person.id] =
+        (projectedTotals[person.id] ?? 0) + slotMinutes;
+
       return {
         person,
         boundaryPenalty,
-        projectedWeeklyHours: (weeklyTotals[person.id] ?? 0) + slotMinutes,
+        projectedWeeklyHours: projectedTotals[person.id] ?? 0,
+        balanceScore: weeklyBalanceScore(projectedTotals, allStaff),
       };
     })
     .sort(
       (a, b) =>
         a.boundaryPenalty - b.boundaryPenalty ||
+        a.balanceScore - b.balanceScore ||
         a.projectedWeeklyHours - b.projectedWeeklyHours ||
         a.person.name.localeCompare(b.person.name, 'sv')
     );
@@ -424,8 +454,8 @@ function getEmptySlotSuggestion(
   if (!best) return 'Ingen tillgänglig person hittades för passet.';
 
   return best.boundaryPenalty === 0
-    ? `Förslag: lägg ${best.person.name} på passet.`
-    : `Förslag: ${best.person.name} kan ta passet, men det kan skapa en öppnings-/stängningskonflikt.`;
+    ? `Förslag: lägg ${best.person.name} på passet för jämnast möjlig timfördelning.`
+    : `Förslag: ${best.person.name} ger jämnast timfördelning, men kan skapa en öppnings-/stängningskonflikt.`;
 }
 
 const defaultStaff: Staff[] = [
