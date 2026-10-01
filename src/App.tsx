@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.1.2';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -634,6 +634,28 @@ export default function App() {
     return totals;
   }, [assignments, staff, visibleDateKeys]);
 
+  const monthlyHoursByPerson = useMemo(() => {
+    const totals: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const year = cursorDate.getFullYear();
+    const month = cursorDate.getMonth();
+
+    for (const assignment of assignments) {
+      const date = new Date(`${assignment.date}T12:00:00`);
+      if (date.getFullYear() !== year || date.getMonth() !== month) continue;
+
+      totals[assignment.employeeId] =
+        (totals[assignment.employeeId] ?? 0) +
+        netWorkMinutes(assignment.start, assignment.end) / 60;
+    }
+
+    return totals;
+  }, [assignments, staff, cursorDate]);
+
+  const selectedMonthLabel = useMemo(
+    () => cursorDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' }),
+    [cursorDate]
+  );
+
   const hourImbalanceNote = useMemo(() => {
     if (staff.length < 2) return '';
 
@@ -1066,6 +1088,29 @@ export default function App() {
     reason?: string
   ) {
     const weekKeys = visibleDates.map(localDateKey);
+    const currentMonth = weekStart.getMonth();
+    const currentYear = weekStart.getFullYear();
+    const weekStartKey = localDateKey(weekStart);
+
+    const monthHistory = assignments
+      .filter((assignment) => {
+        const date = new Date(`${assignment.date}T12:00:00`);
+        return (
+          date.getFullYear() === currentYear &&
+          date.getMonth() === currentMonth &&
+          assignment.date < weekStartKey
+        );
+      })
+      .map((assignment) => {
+        const date = new Date(`${assignment.date}T12:00:00`);
+        return {
+          employeeId: assignment.employeeId,
+          day: getDayKey(date),
+          start: assignment.start,
+          end: assignment.end,
+        };
+      });
+
     const generated: Assignment[] = [];
     const assignedMinutes: Record<string, number> = Object.fromEntries(
       staffSource.map((person) => [person.id, 0])
@@ -1125,6 +1170,27 @@ export default function App() {
             const closingLoadPenalty =
               isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
 
+            const sameSlotThisMonth = monthHistory.filter(
+              (item) =>
+                item.employeeId === person.id &&
+                item.day === day &&
+                item.start === slotStartTime &&
+                item.end === actualEndTime
+            ).length;
+
+            const sameBoundaryThisMonth = monthHistory.filter(
+              (item) =>
+                item.employeeId === person.id &&
+                item.day === day &&
+                ((isOpeningShift && item.start === WORK_START) ||
+                  (isClosingShift && item.end === WORK_END))
+            ).length;
+
+            // Mjuk månadsruljans: används för variation men får inte slå ut rättvis timfördelning.
+            const monthlyRotationPenalty =
+              sameSlotThisMonth * 3500 +
+              sameBoundaryThisMonth * 1800;
+
             const fairnessScore = (assignedMinutes[person.id] ?? 0) * 100;
 
             return {
@@ -1133,7 +1199,8 @@ export default function App() {
                 fairnessScore +
                 consecutiveClosePenalty +
                 closeThenOpenPenalty +
-                closingLoadPenalty,
+                closingLoadPenalty +
+                monthlyRotationPenalty,
             };
           })
           .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
@@ -1182,7 +1249,7 @@ export default function App() {
       setMessage(
         reason
           ? `${reason} Schemat genererades om automatiskt.`
-          : `Schemat skapades med jämn fördelning, max ett pass per dag och första/sista-pass-regler.`
+          : `Schemat skapades med jämn fördelning och försöker variera passen mellan veckorna inom månaden.`
       );
     }
   }
@@ -2126,16 +2193,22 @@ export default function App() {
               <div className="hours-summary">
                 <div className="hours-summary-title">
                   <strong>Schemalagda timmar</strong>
-                  <span>Den här veckan</span>
+                  <span>Vecka {getIsoWeek(cursorDate)} · {selectedMonthLabel}</span>
+                </div>
+                <div className="hours-summary-columns" aria-hidden="true">
+                  <span>Person</span>
+                  <span>Vecka</span>
+                  <span>Månad</span>
                 </div>
                 <div className="hours-summary-list">
                   {staff.map((person) => (
                     <div className="hours-summary-row" key={person.id}>
-                      <span>
+                      <span className="hours-person">
                         <i style={{ background: person.color }} />
                         {person.name}
                       </span>
                       <strong>{(scheduledHoursByPerson[person.id] ?? 0).toFixed(1)} h</strong>
+                      <strong className="month-hours">{(monthlyHoursByPerson[person.id] ?? 0).toFixed(1)} h</strong>
                     </div>
                   ))}
                 </div>
