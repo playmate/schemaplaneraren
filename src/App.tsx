@@ -134,19 +134,6 @@ function contiguousShiftEnd(start: string, availableEnd: string, desiredMinutes:
   return minutesToTime(Math.min(limit, startMin + desiredMinutes));
 }
 
-function weekScheduleSignature(items: Assignment[], weekStartDate: Date) {
-  const weekKeys = DAY_KEYS.map((_, index) => localDateKey(addDays(weekStartDate, index)));
-
-  return items
-    .filter((assignment) => weekKeys.includes(assignment.date))
-    .map((assignment) => {
-      const dayIndex = weekKeys.indexOf(assignment.date);
-      return `${dayIndex}|${assignment.start}|${assignment.end}|${assignment.employeeId}`;
-    })
-    .sort()
-    .join('||');
-}
-
 function softColor(hex: string, alpha = 0.24) {
   const clean = hex.replace('#', '');
   const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
@@ -1069,193 +1056,123 @@ export default function App() {
     reason?: string
   ) {
     const weekKeys = visibleDates.map(localDateKey);
-    const recentWeeks = Array.from({ length: 5 }, (_, index) => startOfWeek(addDays(weekStart, -(index + 1) * 7)));
-    const recentSignatures = recentWeeks
-      .map((recentWeekStart) => weekScheduleSignature(assignments, recentWeekStart))
-      .filter(Boolean);
+    const generated: Assignment[] = [];
+    const assignedMinutes: Record<string, number> = Object.fromEntries(
+      staffSource.map((person) => [person.id, 0])
+    );
+    const closingCounts: Record<string, number> = Object.fromEntries(
+      staffSource.map((person) => [person.id, 0])
+    );
+    const lastClosingDate: Record<string, string | undefined> = {};
+    const coverageGaps: string[] = [];
 
-    const recentSlotAssignments = recentWeeks.flatMap((recentWeekStart, weekOffset) => {
-      const keys = DAY_KEYS.map((_, index) => localDateKey(addDays(recentWeekStart, index)));
-      return assignments
-        .filter((assignment) => keys.includes(assignment.date))
-        .map((assignment) => ({
-          employeeId: assignment.employeeId,
-          dayIndex: keys.indexOf(assignment.date),
-          start: assignment.start,
-          end: assignment.end,
-          age: weekOffset + 1,
-        }));
-    });
+    for (const date of visibleDates) {
+      const day = getDayKey(date);
+      const dateKey = localDateKey(date);
+      const previousDateKey = localDateKey(addDays(date, -1));
+      let slotStart = toMinutes(WORK_START);
+      const workdayEnd = toMinutes(WORK_END);
+      let slotIndex = 0;
 
-    const maxAttempts = Math.max(6, staffSource.length * 2);
-    let selectedGenerated: Assignment[] = [];
-    let selectedCoverageGaps: string[] = [];
-    let foundUnique = false;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const generated: Assignment[] = [];
-      const assignedMinutes: Record<string, number> = Object.fromEntries(staffSource.map((person) => [person.id, 0]));
-      const closingCounts: Record<string, number> = Object.fromEntries(staffSource.map((person) => [person.id, 0]));
-      const lastWorkedSlot: Record<string, { date: string; end: string } | undefined> = {};
-      const lastClosingDate: Record<string, string | undefined> = {};
-      const coverageGaps: string[] = [];
-
-      for (const date of visibleDates) {
-        const day = getDayKey(date);
-        const dateKey = localDateKey(date);
-        const dayIndex = DAY_KEYS.indexOf(day);
-        const previousDateKey = localDateKey(addDays(date, -1));
-        let slotStart = toMinutes(WORK_START);
-        const workdayEnd = toMinutes(WORK_END);
-        let slotIndex = 0;
-
-        while (slotStart < workdayEnd) {
-          if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
-            slotStart = toMinutes(LUNCH_END);
-            continue;
-          }
-
-          const slotStartTime = minutesToTime(slotStart);
-          const slotEndTime = contiguousShiftEnd(slotStartTime, WORK_END, shiftLengthMinutes);
-          const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
-          const actualEndTime = minutesToTime(slotEnd);
-
-          if (slotEnd <= slotStart) {
-            if (slotStart < toMinutes(LUNCH_END)) {
-              slotStart = toMinutes(LUNCH_END);
-              continue;
-            }
-            break;
-          }
-
-          const isClosingShift = slotEnd === workdayEnd;
-          const isOpeningShift = slotStart === toMinutes(WORK_START);
-
-          const candidates = staffSource
-            .filter((person) => {
-              if (!person.days[day]) return false;
-              if (excluded.some((entry) => entry.employeeId === person.id && entry.date === dateKey)) return false;
-              if (generated.some((assignment) => assignment.employeeId === person.id && assignment.date === dateKey)) return false;
-              const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
-              const blocked = person.blockedTimes?.[day] ?? [];
-              return (
-                toMinutes(availability.start) <= slotStart &&
-                toMinutes(availability.end) >= slotEnd &&
-                !blocked.some((period) => overlapsTime(slotStartTime, actualEndTime, period))
-              );
-            })
-            .map((person, personIndex) => {
-              const previous = lastWorkedSlot[person.id];
-
-              const consecutiveClosePenalty =
-                isClosingShift && lastClosingDate[person.id] === previousDateKey ? 80000 : 0;
-
-              const closeThenOpenPenalty =
-                isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
-
-              const closingLoadPenalty =
-                isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
-
-              const recentSameSlotPenalty = recentSlotAssignments.reduce((sum, previousSlot) => {
-                if (
-                  previousSlot.employeeId === person.id &&
-                  previousSlot.dayIndex === dayIndex &&
-                  previousSlot.start === slotStartTime &&
-                  previousSlot.end === actualEndTime
-                ) {
-                  return sum + Math.max(5000, 18000 - previousSlot.age * 2500);
-                }
-                return sum;
-              }, 0);
-
-              const fairnessScore = (assignedMinutes[person.id] ?? 0) * 100;
-              const rotationRank =
-                (personIndex - (getIsoWeek(weekStart) + attempt) + staffSource.length * 10) %
-                Math.max(1, staffSource.length);
-              const rotationPenalty = rotationRank * 10;
-
-              return {
-                person,
-                score:
-                  fairnessScore +
-                  consecutiveClosePenalty +
-                  closeThenOpenPenalty +
-                  closingLoadPenalty +
-                  recentSameSlotPenalty +
-                  rotationPenalty,
-              };
-            })
-            .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
-
-          const chosen = candidates[0]?.person;
-
-          if (chosen) {
-            generated.push({
-              id: `auto-${dateKey}-${slotIndex}-${chosen.id}`,
-              employeeId: chosen.id,
-              date: dateKey,
-              start: slotStartTime,
-              end: actualEndTime,
-            });
-
-            assignedMinutes[chosen.id] =
-              (assignedMinutes[chosen.id] ?? 0) +
-              netWorkMinutes(slotStartTime, actualEndTime);
-
-            lastWorkedSlot[chosen.id] = {
-              date: dateKey,
-              end: actualEndTime,
-            };
-
-            if (isClosingShift) {
-              closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
-              lastClosingDate[chosen.id] = dateKey;
-            }
-          } else {
-            coverageGaps.push(`${DAY_LABELS[day]} ${slotStartTime}–${actualEndTime}`);
-          }
-
-          slotStart = slotEnd;
-          if (slotStart === toMinutes(LUNCH_START)) {
-            slotStart = toMinutes(LUNCH_END);
-          }
-          slotIndex += 1;
+      while (slotStart < workdayEnd) {
+        if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+          slotStart = toMinutes(LUNCH_END);
+          continue;
         }
+
+        const slotStartTime = minutesToTime(slotStart);
+        const slotEndTime = contiguousShiftEnd(slotStartTime, WORK_END, shiftLengthMinutes);
+        const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
+        const actualEndTime = minutesToTime(slotEnd);
+
+        if (slotEnd <= slotStart) break;
+
+        const isClosingShift = slotEnd === workdayEnd;
+        const isOpeningShift = slotStart === toMinutes(WORK_START);
+
+        const candidates = staffSource
+          .filter((person) => {
+            if (!person.days[day]) return false;
+            if (excluded.some((entry) => entry.employeeId === person.id && entry.date === dateKey)) return false;
+            if (generated.some((assignment) => assignment.employeeId === person.id && assignment.date === dateKey)) return false;
+
+            const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+            const blocked = person.blockedTimes?.[day] ?? [];
+
+            return (
+              toMinutes(availability.start) <= slotStart &&
+              toMinutes(availability.end) >= slotEnd &&
+              !blocked.some((period) => overlapsTime(slotStartTime, actualEndTime, period))
+            );
+          })
+          .map((person) => {
+            const consecutiveClosePenalty =
+              isClosingShift && lastClosingDate[person.id] === previousDateKey ? 80000 : 0;
+
+            const closeThenOpenPenalty =
+              isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
+
+            const closingLoadPenalty =
+              isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
+
+            const fairnessScore = (assignedMinutes[person.id] ?? 0) * 100;
+
+            return {
+              person,
+              score:
+                fairnessScore +
+                consecutiveClosePenalty +
+                closeThenOpenPenalty +
+                closingLoadPenalty,
+            };
+          })
+          .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+
+        const chosen = candidates[0]?.person;
+
+        if (chosen) {
+          generated.push({
+            id: `auto-${dateKey}-${slotIndex}-${chosen.id}`,
+            employeeId: chosen.id,
+            date: dateKey,
+            start: slotStartTime,
+            end: actualEndTime,
+          });
+
+          assignedMinutes[chosen.id] =
+            (assignedMinutes[chosen.id] ?? 0) +
+            netWorkMinutes(slotStartTime, actualEndTime);
+
+          if (isClosingShift) {
+            closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
+            lastClosingDate[chosen.id] = dateKey;
+          }
+        } else {
+          coverageGaps.push(`${DAY_LABELS[day]} ${slotStartTime}–${actualEndTime}`);
+        }
+
+        slotStart = slotEnd;
+        if (slotStart === toMinutes(LUNCH_START)) {
+          slotStart = toMinutes(LUNCH_END);
+        }
+        slotIndex += 1;
       }
-
-      const signature = weekScheduleSignature(generated, weekStart);
-      const duplicatesRecentWeek = Boolean(signature) && recentSignatures.includes(signature);
-
-      selectedGenerated = generated;
-      selectedCoverageGaps = coverageGaps;
-
-      if (!duplicatesRecentWeek) {
-        foundUnique = true;
-        break;
-      }
-    }
-
-    if (!foundUnique && recentSignatures.length > 0) {
-      setMessage(
-        `${reason ? reason + ' ' : ''}Kunde inte skapa ett schema som skiljer sig från de senaste fem veckorna utan att bryta mot övriga regler.`
-      );
-      return;
     }
 
     setAssignments((current) => [
       ...current.filter((assignment) => !weekKeys.includes(assignment.date)),
-      ...selectedGenerated,
+      ...generated,
     ]);
 
-    if (selectedCoverageGaps.length) {
+    if (coverageGaps.length) {
       setMessage(
-        `${reason ? reason + ' ' : ''}Schemat genererades om med sex veckors ruljans, men följande tider saknar tillgänglig personal: ${selectedCoverageGaps.join(', ')}.`
+        `${reason ? reason + ' ' : ''}Schemat genererades om, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`
       );
     } else {
       setMessage(
         reason
-          ? `${reason} Schemat genererades om automatiskt med minst sex veckors ruljans.`
-          : `Schemat skapades med minst sex veckors ruljans och hänsyn till jämn fördelning, max ett pass per dag och första/sista-pass-regler.`
+          ? `${reason} Schemat genererades om automatiskt.`
+          : `Schemat skapades med jämn fördelning, max ett pass per dag och första/sista-pass-regler.`
       );
     }
   }
@@ -1493,21 +1410,6 @@ export default function App() {
         netWorkMinutes(assignment.start, assignment.end);
     }
 
-    const recentWeeks = Array.from({ length: 5 }, (_, index) =>
-      startOfWeek(addDays(weekStart, -(index + 1) * 7))
-    );
-    const recentSlots = recentWeeks.flatMap((recentWeekStart, weekOffset) => {
-      const recentDateKey = localDateKey(addDays(recentWeekStart, dayIndex));
-      return assignments
-        .filter((assignment) => assignment.date === recentDateKey)
-        .map((assignment) => ({
-          employeeId: assignment.employeeId,
-          start: assignment.start,
-          end: assignment.end,
-          age: weekOffset + 1,
-        }));
-    });
-
     const generated: Assignment[] = [];
     const used = new Set<string>();
     const gaps: string[] = [];
@@ -1570,23 +1472,11 @@ export default function App() {
               ? 100000
               : 0);
 
-          const recentSameSlotPenalty = recentSlots.reduce((sum, previousSlot) => {
-            if (
-              previousSlot.employeeId === person.id &&
-              previousSlot.start === slotStartTime &&
-              previousSlot.end === actualEndTime
-            ) {
-              return sum + Math.max(5000, 18000 - previousSlot.age * 2500);
-            }
-            return sum;
-          }, 0);
-
           return {
             person,
             score:
               (weeklyMinutes[person.id] ?? 0) +
-              boundaryPenalty +
-              recentSameSlotPenalty,
+              boundaryPenalty,
           };
         })
         .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
