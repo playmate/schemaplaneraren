@@ -1017,6 +1017,11 @@ input:focus {
   border-top: 1px solid #3f1115;
 }
 
+.assignment-warning-tooltip .assignment-warning-tip {
+  color: #bfdbfe;
+  font-weight: 800;
+}
+
 .assignment-warning:hover .assignment-warning-tooltip {
   opacity: 1;
   visibility: visible;
