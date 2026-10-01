@@ -1168,9 +1168,11 @@ export default function App() {
                 return sum;
               }, 0);
 
-              const fairnessScore = assignedMinutes[person.id] ?? 0;
-              const rotationRank = (personIndex - (getIsoWeek(weekStart) + attempt) + staffSource.length * 10) % Math.max(1, staffSource.length);
-              const rotationPenalty = rotationRank * 450;
+              const fairnessScore = (assignedMinutes[person.id] ?? 0) * 100;
+              const rotationRank =
+                (personIndex - (getIsoWeek(weekStart) + attempt) + staffSource.length * 10) %
+                Math.max(1, staffSource.length);
+              const rotationPenalty = rotationRank * 10;
 
               return {
                 person,
