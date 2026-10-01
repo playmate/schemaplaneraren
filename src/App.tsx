@@ -116,6 +116,15 @@ function parseDuration(value: string) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
+function normalizeClock(hourText: string, minuteText?: string) {
+  const hour = Number(hourText);
+  const minute = Number(minuteText ?? 0);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
 function contiguousShiftEnd(start: string, availableEnd: string, desiredMinutes: number) {
   const startMin = toMinutes(start);
   const maxEnd = toMinutes(availableEnd);
@@ -1514,6 +1523,171 @@ export default function App() {
     );
   }
 
+  function updatePersonAvailability(
+    person: Staff,
+    day: DayKey,
+    patch: Partial<WorkTime>,
+    description: string
+  ) {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const currentTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const nextTime = { ...currentTime, ...patch };
+
+    if (toMinutes(nextTime.start) >= toMinutes(nextTime.end)) {
+      setMessage('Starttiden måste vara före sluttiden.');
+      return;
+    }
+
+    const nextStaff = staff.map((item) =>
+      item.id === person.id
+        ? {
+            ...item,
+            days: { ...item.days, [day]: true },
+            workTimes: { ...item.workTimes, [day]: nextTime },
+          }
+        : item
+    );
+
+    const currentAssignment = assignments.find(
+      (assignment) => assignment.employeeId === person.id && assignment.date === dateKey
+    );
+    const hasConflict =
+      currentAssignment &&
+      (
+        toMinutes(currentAssignment.start) < toMinutes(nextTime.start) ||
+        toMinutes(currentAssignment.end) > toMinutes(nextTime.end)
+      );
+
+    setStaff(nextStaff);
+
+    if (hasConflict) {
+      generateSimpleSchedule(nextStaff, [], `${description}.`);
+    } else {
+      setMessage(`${description}. Gäller ${DAY_LABELS[day]} och ingen nuvarande schemakrock behövde rättas.`);
+    }
+  }
+
+  function addBlockedRange(
+    person: Staff,
+    day: DayKey,
+    start: string,
+    end: string,
+    description: string
+  ) {
+    if (toMinutes(start) >= toMinutes(end)) {
+      setMessage('Starttiden måste vara före sluttiden.');
+      return;
+    }
+
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const existing = person.blockedTimes?.[day] ?? [];
+    const duplicate = existing.some((period) => period.start === start && period.end === end);
+
+    const nextStaff = staff.map((item) =>
+      item.id === person.id
+        ? {
+            ...item,
+            blockedTimes: {
+              ...item.blockedTimes,
+              [day]: duplicate ? existing : [...existing, { start, end }],
+            },
+          }
+        : item
+    );
+
+    const hasConflict = assignments.some(
+      (assignment) =>
+        assignment.employeeId === person.id &&
+        assignment.date === dateKey &&
+        overlapsTime(assignment.start, assignment.end, { start, end })
+    );
+
+    setStaff(nextStaff);
+
+    if (hasConflict) {
+      generateSimpleSchedule(nextStaff, [], `${description}.`);
+    } else {
+      setMessage(`${description}. Ingen nuvarande schemakrock behövde rättas.`);
+    }
+  }
+
+  function describeDay(day: DayKey) {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const dayAssignments = assignments
+      .filter((assignment) => assignment.date === dateKey)
+      .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+
+    if (!dayAssignments.length) {
+      setMessage(`${DAY_LABELS[day]} har inga schemalagda pass.`);
+      return;
+    }
+
+    const description = dayAssignments
+      .map((assignment) => {
+        const person = staff.find((item) => item.id === assignment.employeeId);
+        return `${assignment.start}–${assignment.end} ${person?.name ?? 'Okänd'}`;
+      })
+      .join(', ');
+
+    setMessage(`${DAY_LABELS[day]}: ${description}.`);
+  }
+
+  function describeOpenSlots(day: DayKey) {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const dayAssignments = assignments.filter((assignment) => assignment.date === dateKey);
+    const open: string[] = [];
+    let slotStart = toMinutes(WORK_START);
+
+    while (slotStart < toMinutes(WORK_END)) {
+      if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+        slotStart = toMinutes(LUNCH_END);
+        continue;
+      }
+
+      const start = minutesToTime(slotStart);
+      const end = contiguousShiftEnd(start, WORK_END, shiftLengthMinutes);
+      const endMinutes = Math.min(toMinutes(WORK_END), toMinutes(end));
+      if (endMinutes <= slotStart) break;
+
+      const endText = minutesToTime(endMinutes);
+      const occupied = dayAssignments.some((assignment) =>
+        overlapsTime(start, endText, { start: assignment.start, end: assignment.end })
+      );
+
+      if (!occupied) open.push(`${start}–${endText}`);
+
+      slotStart = endMinutes;
+      if (slotStart === toMinutes(LUNCH_START)) slotStart = toMinutes(LUNCH_END);
+    }
+
+    setMessage(
+      open.length
+        ? `Lediga pass ${DAY_LABELS[day]}: ${open.join(', ')}.`
+        : `Det finns inga lediga pass på ${DAY_LABELS[day]}.`
+    );
+  }
+
+  function describePersonHours(person: Staff) {
+    const hours = scheduledHoursByPerson[person.id] ?? 0;
+    setMessage(`${person.name} har ${hours.toFixed(1)} schemalagda timmar den här veckan.`);
+  }
+
+  function describeBoundaryWorker(day: DayKey, boundary: 'first' | 'last') {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const dayAssignments = assignments.filter((assignment) => assignment.date === dateKey);
+    const assignment =
+      boundary === 'first'
+        ? dayAssignments.find((item) => item.start === WORK_START)
+        : dayAssignments.find((item) => item.end === WORK_END);
+    const person = assignment ? staff.find((item) => item.id === assignment.employeeId) : undefined;
+
+    setMessage(
+      assignment && person
+        ? `${boundary === 'first' ? 'Första' : 'Sista'} passet på ${DAY_LABELS[day]} har ${person.name} (${assignment.start}–${assignment.end}).`
+        : `Ingen är schemalagd på ${boundary === 'first' ? 'första' : 'sista'} passet på ${DAY_LABELS[day]}.`
+    );
+  }
+
   function parsePrompt() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
@@ -1551,6 +1725,40 @@ export default function App() {
     const dayCommandWord = Object.keys(SWEDISH_DAY_TO_KEY).find((word) => text.includes(word));
     const dayCommandKey = dayCommandWord ? SWEDISH_DAY_TO_KEY[dayCommandWord] : undefined;
 
+    const mentionedPeople = staff.filter((item) =>
+      text.includes(item.name.toLocaleLowerCase('sv-SE'))
+    );
+
+    if (dayCommandKey && /^(vem\s+jobbar|visa\s+(?:schema|schemat)|hur\s+ser\s+.+\s+ut)/.test(text)) {
+      describeDay(dayCommandKey);
+      setPrompt('');
+      return;
+    }
+
+    if (dayCommandKey && /^(visa\s+)?(?:lediga|tomma)\s+pass|vilka\s+pass\s+är\s+lediga/.test(text)) {
+      describeOpenSlots(dayCommandKey);
+      setPrompt('');
+      return;
+    }
+
+    if (dayCommandKey && /vem\s+(?:öppnar|har\s+första\s+passet)/.test(text)) {
+      describeBoundaryWorker(dayCommandKey, 'first');
+      setPrompt('');
+      return;
+    }
+
+    if (dayCommandKey && /vem\s+(?:stänger|har\s+sista\s+passet)/.test(text)) {
+      describeBoundaryWorker(dayCommandKey, 'last');
+      setPrompt('');
+      return;
+    }
+
+    if (mentionedPeople.length === 1 && /(?:hur\s+många\s+timmar|timmar\s+har|arbetstid)/.test(text)) {
+      describePersonHours(mentionedPeople[0]);
+      setPrompt('');
+      return;
+    }
+
     if (dayCommandKey && /^(rensa|töm|tömma|nollställ)\b/.test(text) && !/schema|schemat/.test(text)) {
       clearDay(dayCommandKey);
       setPrompt('');
@@ -1567,10 +1775,6 @@ export default function App() {
     }
 
     if (/^byt\b/.test(text) && dayCommandKey) {
-      const mentionedPeople = staff.filter((item) =>
-        text.includes(item.name.toLocaleLowerCase('sv-SE'))
-      );
-
       if (mentionedPeople.length === 2) {
         swapPeopleOnDay(mentionedPeople[0], mentionedPeople[1], dayCommandKey);
       } else {
@@ -1587,6 +1791,92 @@ export default function App() {
     if (person && dayKey) {
       const date = addDays(weekStart, DAY_KEYS.indexOf(dayKey));
       const dateKey = localDateKey(date);
+
+      const startsAt = text.match(/(?:börjar|startar|kan\s+börja|jobbar\s+från|arbetar\s+från)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      if (startsAt) {
+        const time = normalizeClock(startsAt[1], startsAt[2]);
+        if (!time) {
+          setMessage('Kunde inte läsa starttiden.');
+        } else {
+          updatePersonAvailability(person, dayKey, { start: time }, `${person.name} börjar ${time} på ${DAY_LABELS[dayKey]}`);
+        }
+        setPrompt('');
+        return;
+      }
+
+      const endsAt = text.match(/(?:slutar|slutar\s+jobba|slutar\s+arbeta|kan\s+jobba\s+till|kan\s+arbeta\s+till|jobbar\s+till|arbetar\s+till)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      if (endsAt) {
+        const time = normalizeClock(endsAt[1], endsAt[2]);
+        if (!time) {
+          setMessage('Kunde inte läsa sluttiden.');
+        } else {
+          updatePersonAvailability(person, dayKey, { end: time }, `${person.name} slutar ${time} på ${DAY_LABELS[dayKey]}`);
+        }
+        setPrompt('');
+        return;
+      }
+
+      const worksBetween =
+        text.match(/(?:jobbar|arbetar|kan\s+jobba|kan\s+arbeta)\s+(?:mellan\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till|och)\s*(\d{1,2})(?::(\d{2}))?/);
+      if (worksBetween) {
+        const start = normalizeClock(worksBetween[1], worksBetween[2]);
+        const end = normalizeClock(worksBetween[3], worksBetween[4]);
+        if (!start || !end) {
+          setMessage('Kunde inte läsa arbetstiden.');
+        } else {
+          updatePersonAvailability(
+            person,
+            dayKey,
+            { start, end },
+            `${person.name} jobbar ${start}–${end} på ${DAY_LABELS[dayKey]}`
+          );
+        }
+        setPrompt('');
+        return;
+      }
+
+      const notBefore = text.match(/kan\s+inte\s+(?:jobba|arbeta)\s+före(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      if (notBefore) {
+        const time = normalizeClock(notBefore[1], notBefore[2]);
+        if (!time) {
+          setMessage('Kunde inte läsa tiden.');
+        } else {
+          updatePersonAvailability(person, dayKey, { start: time }, `${person.name} kan inte jobba före ${time} på ${DAY_LABELS[dayKey]}`);
+        }
+        setPrompt('');
+        return;
+      }
+
+      const notAfter = text.match(/kan\s+inte\s+(?:jobba|arbeta)\s+efter(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      if (notAfter) {
+        const time = normalizeClock(notAfter[1], notAfter[2]);
+        if (!time) {
+          setMessage('Kunde inte läsa tiden.');
+        } else {
+          updatePersonAvailability(person, dayKey, { end: time }, `${person.name} kan inte jobba efter ${time} på ${DAY_LABELS[dayKey]}`);
+        }
+        setPrompt('');
+        return;
+      }
+
+      const blockedRange = text.match(/kan\s+inte\s+(?:jobba|arbeta)\s+(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till|och)\s*(\d{1,2})(?::(\d{2}))?/);
+      if (blockedRange) {
+        const start = normalizeClock(blockedRange[1], blockedRange[2]);
+        const end = normalizeClock(blockedRange[3], blockedRange[4]);
+        if (!start || !end) {
+          setMessage('Kunde inte läsa tidsintervallet.');
+        } else {
+          addBlockedRange(
+            person,
+            dayKey,
+            start,
+            end,
+            `${person.name} kan inte jobba ${start}–${end} på ${DAY_LABELS[dayKey]}`
+          );
+        }
+        setPrompt('');
+        return;
+      }
 
       const cannotWorkAt = text.match(/kan\s+inte\s+(?:jobba|arbeta)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
       if (cannotWorkAt) {
@@ -1635,7 +1925,7 @@ export default function App() {
         return;
       }
 
-      if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande/.test(text)) {
+      if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande|kan inte jobba den dagen|kan inte arbeta den dagen/.test(text)) {
         const hasConflict = assignments.some(
           (assignment) => assignment.employeeId === person.id && assignment.date === dateKey
         );
@@ -1732,15 +2022,22 @@ export default function App() {
 
             {showPromptHelp && (
               <div className="prompt-help-panel">
-                <div><strong>Skapa hela veckan</strong><span>“skapa schema”</span></div>
-                <div><strong>Gör om en dag</strong><span>“gör om fredag” · “generera om tisdag”</span></div>
-                <div><strong>Rensa en dag</strong><span>“rensa fredag” · “töm onsdag”</span></div>
-                <div><strong>Lägg till person</strong><span>“lägg till Erik måndag”</span></div>
-                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag”</span></div>
-                <div><strong>Tidsbegränsning</strong><span>“Erik kan inte jobba kl 11 på måndagar”</span></div>
+                <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “generera schema” · “fyll schema”</span></div>
+                <div><strong>Gör om en dag</strong><span>“gör om fredag” · “generera om tisdag” · “lägg om onsdag”</span></div>
+                <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “rensa schema”</span></div>
+                <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
+                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
+                <div><strong>Börjar senare</strong><span>“Anna börjar 12 på onsdag” · “Erik startar kl 10 torsdag”</span></div>
+                <div><strong>Slutar tidigare</strong><span>“Sara slutar 14 på fredag” · “Erik kan jobba till 15 tisdag”</span></div>
+                <div><strong>Arbetstid en dag</strong><span>“Anna jobbar 10-14 på onsdag” · “Sara arbetar mellan 9 och 15 fredag”</span></div>
+                <div><strong>Inte före/efter</strong><span>“Erik kan inte jobba före 10 måndag” · “Sara kan inte jobba efter 14 tisdag”</span></div>
+                <div><strong>Blockerad tid</strong><span>“Erik kan inte jobba 10-12 på torsdag” · “Anna kan inte jobba kl 11 på måndagar”</span></div>
                 <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag”</span></div>
                 <div><strong>Byt två personer</strong><span>“byt Erik med Sara på tisdag” · “byt plats på Erik och Sara på tisdag”</span></div>
-                <div><strong>Nollställ veckan</strong><span>“rensa schema”</span></div>
+                <div><strong>Visa en dag</strong><span>“vem jobbar fredag?” · “visa schema tisdag”</span></div>
+                <div><strong>Lediga pass</strong><span>“visa lediga pass onsdag” · “vilka pass är lediga fredag?”</span></div>
+                <div><strong>Första/sista pass</strong><span>“vem öppnar måndag?” · “vem stänger fredag?”</span></div>
+                <div><strong>Timmar per person</strong><span>“hur många timmar har Erik?” · “arbetstid Sara”</span></div>
               </div>
             )}
           </div>
