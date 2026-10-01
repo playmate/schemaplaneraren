@@ -207,6 +207,69 @@ function DraggableStaff({ person }: { person: Staff }) {
   );
 }
 
+function DraggableAssignmentCard({
+  person,
+  assignment,
+  lane,
+  laneCount,
+  startMin,
+  totalHeight,
+  onRemove,
+}: {
+  person: Staff;
+  assignment: Assignment;
+  lane: number;
+  laneCount: number;
+  startMin: number;
+  totalHeight: number;
+  onRemove: (assignmentId: string) => void;
+}) {
+  const { ref: dragRef, handleRef } = useDraggable({ id: `assignment:${assignment.id}` });
+  const { ref: dropRef, isDropTarget } = useDroppable({ id: `assignment:${assignment.id}` });
+
+  const width = 100 / laneCount;
+  const top = Math.max(0, (toMinutes(assignment.start) - startMin) * PIXELS_PER_MINUTE);
+  const bottom = Math.min(totalHeight, (toMinutes(assignment.end) - startMin) * PIXELS_PER_MINUTE);
+  const height = Math.max(34, bottom - top);
+  const hours = formatHours(assignment.start, assignment.end);
+
+  const setRefs = (node: HTMLDivElement | null) => {
+    dragRef(node);
+    dropRef(node);
+  };
+
+  return (
+    <div
+      ref={setRefs}
+      className={`assignment-card draggable-assignment ${isDropTarget ? 'assignment-drop-target' : ''}`}
+      style={{
+        top,
+        height,
+        left: `calc(${lane * width}% + 4px)`,
+        width: `calc(${width}% - 8px)`,
+        borderTopColor: person.color,
+        background: softColor(person.color, 0.28),
+      }}
+    >
+      <button
+        className="remove-assignment"
+        title="Ta bort"
+        onClick={(event) => {
+          event.stopPropagation();
+          onRemove(assignment.id);
+        }}
+      >
+        ×
+      </button>
+      <div ref={handleRef} className="assignment-drag-area" title="Dra till ett annat pass för att byta plats">
+        <strong className="assignment-name">{person.name}</strong>
+        <span>{assignment.start}–{assignment.end}</span>
+        <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h arbete</small>
+      </div>
+    </div>
+  );
+}
+
 function DayColumn({
   date,
   staff,
@@ -279,40 +342,18 @@ function DayColumn({
         {scheduledWithLanes.length === 0 && <div className="empty-day">Dra hit personal</div>}
 
         <div className="assignment-layer">
-          {scheduledWithLanes.map(({ person, assignment, lane }) => {
-            const width = 100 / laneCount;
-            const top = Math.max(0, (toMinutes(assignment.start) - startMin) * PIXELS_PER_MINUTE);
-            const bottom = Math.min(totalHeight, (toMinutes(assignment.end) - startMin) * PIXELS_PER_MINUTE);
-            const height = Math.max(34, bottom - top);
-            const hours = formatHours(assignment.start, assignment.end);
-            const lunch = lunchMinutesInside(assignment.start, assignment.end);
-
-            return (
-              <div
-                key={assignment.id}
-                className="assignment-card"
-                style={{
-                  top,
-                  height,
-                  left: `calc(${lane * width}% + 4px)`,
-                  width: `calc(${width}% - 8px)`,
-                  borderTopColor: person.color,
-                  background: softColor(person.color, 0.28),
-                }}
-              >
-                <button
-                  className="remove-assignment"
-                  title="Ta bort"
-                  onClick={() => onRemove(assignment.id)}
-                >
-                  ×
-                </button>
-                <strong className="assignment-name">{person.name}</strong>
-                <span>{assignment.start}–{assignment.end}</span>
-                <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h arbete{lunch ? ` · lunch ${lunch} min` : ''}</small>
-              </div>
-            );
-          })}
+          {scheduledWithLanes.map(({ person, assignment, lane }) => (
+            <DraggableAssignmentCard
+              key={assignment.id}
+              person={person}
+              assignment={assignment}
+              lane={lane}
+              laneCount={laneCount}
+              startMin={startMin}
+              totalHeight={totalHeight}
+              onRemove={onRemove}
+            />
+          ))}
         </div>
       </div>
     </section>
@@ -327,10 +368,10 @@ export default function App() {
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [shiftLengthMinutes, setShiftLengthMinutes] = useState<number>(() => {
     const saved = localStorage.getItem('scheduler-simple-shift-length-v1');
-    return saved ? Math.max(30, Number(saved)) : 180;
+    return saved ? Math.max(30, Number(saved)) : 120;
   });
   const [shiftLengthText, setShiftLengthText] = useState(() => durationLabel(
-    Number(localStorage.getItem('scheduler-simple-shift-length-v1') ?? 180)
+    Number(localStorage.getItem('scheduler-simple-shift-length-v1') ?? 120)
   ));
 
   const [staff, setStaff] = useState<Staff[]>(() => {
@@ -485,9 +526,35 @@ export default function App() {
     const sourceId = String(event.operation.source?.id ?? '');
     const targetId = String(event.operation.target?.id ?? '');
 
-    if (!sourceId.startsWith('staff:') || !targetId.startsWith('day:')) return;
+    if (sourceId.startsWith('assignment:') && targetId.startsWith('assignment:')) {
+      const sourceAssignmentId = sourceId.replace('assignment:', '');
+      const targetAssignmentId = targetId.replace('assignment:', '');
 
-    assignPerson(sourceId.replace('staff:', ''), targetId.replace('day:', ''));
+      if (sourceAssignmentId === targetAssignmentId) return;
+
+      setAssignments((current) => {
+        const source = current.find((assignment) => assignment.id === sourceAssignmentId);
+        const target = current.find((assignment) => assignment.id === targetAssignmentId);
+        if (!source || !target) return current;
+
+        return current.map((assignment) => {
+          if (assignment.id === sourceAssignmentId) {
+            return { ...assignment, employeeId: target.employeeId };
+          }
+          if (assignment.id === targetAssignmentId) {
+            return { ...assignment, employeeId: source.employeeId };
+          }
+          return assignment;
+        });
+      });
+
+      setMessage('Personerna bytte pass.');
+      return;
+    }
+
+    if (sourceId.startsWith('staff:') && targetId.startsWith('day:')) {
+      assignPerson(sourceId.replace('staff:', ''), targetId.replace('day:', ''));
+    }
   }
 
   function generateSimpleSchedule() {
