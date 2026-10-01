@@ -926,58 +926,112 @@ export default function App() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
 
-    if (/^(generera|generera schema|full schema|skapa schema|fyll schema|fyll personalschema)$/.test(text)) {
-      setScheduleMode('staff');
+    const employee = employees.find((e) => text.includes(e.name.toLocaleLowerCase('sv-SE')));
+    const mentionedProject = projects.find((p) => text.includes(p.name.toLocaleLowerCase('sv-SE')));
+    const weekStart = startOfWeek(cursorDate);
+
+    const resolveDay = (token?: string) => token ? SWEDISH_DAY_TO_KEY[token] : undefined;
+    const dateForDay = (dayKey: DayKey) => addDays(weekStart, WEEKDAY_KEYS.indexOf(dayKey));
+    const setAbsenceForDate = (employeeId: string, date: Date, reason: Absence['reason']) => {
+      const dateKey = localDateKey(date);
+      setAbsences((current) => [
+        ...current.filter((absence) => !(absence.employeeId === employeeId && absence.date === dateKey)),
+        { employeeId, date: dateKey, reason },
+      ]);
+      setAssignments((current) => current.filter((assignment) => !(assignment.employeeId === employeeId && assignment.date === dateKey)));
+      setTaskAssignments((current) => current.map((task) =>
+        task.employeeId === employeeId && task.date === dateKey ? { ...task, employeeId: null } : task
+      ));
+    };
+
+    const generateWords = /^(generera|generera schema|full schema|fullt schema|skapa schema|gör schema|gör ett schema|bygg schema|bygg ett schema|fyll schema|fyll schemat|schemalägg|schemalägg veckan|skapa veckoschema)$/;
+    if (generateWords.test(text)) {
       setAppTab('schedule');
-      autoFillVisible();
+      setScheduleMode('project');
+      generateProjectSchedule();
       setPrompt('');
       return;
     }
 
-    const employee = employees.find((e) => text.includes(e.name.toLocaleLowerCase('sv-SE')));
-    const mentionedProject = projects.find((p) => text.includes(p.name.toLocaleLowerCase('sv-SE')));
-    let changed = false;
-
-    const sickMatch = text.match(/sjuk\s+(?:på\s+)?([a-zåäö]+)/);
-    if (employee && sickMatch) {
-      const dayKey = SWEDISH_DAY_TO_KEY[sickMatch[1]];
-      if (dayKey && WEEKDAY_KEYS.includes(dayKey)) {
-        const date = addDays(startOfWeek(cursorDate), WEEKDAY_KEYS.indexOf(dayKey));
-        const dateKey = localDateKey(date);
-        setAbsences((current) => [
-          ...current.filter((absence) => !(absence.employeeId === employee.id && absence.date === dateKey)),
-          { employeeId: employee.id, date: dateKey, reason: 'sick' },
-        ]);
-        setAssignments((current) => current.filter((assignment) => !(assignment.employeeId === employee.id && assignment.date === dateKey)));
-        setTaskAssignments((current) => current.map((task) =>
-          task.employeeId === employee.id && task.date === dateKey ? { ...task, employeeId: null } : task
-        ));
-        setAppTab('schedule');
-        setScheduleMode('staff');
-        setPrompt('');
-        setMessage(`${employee.name} markerades sjuk ${DAY_LABELS[dayKey]} ${dateKey} och togs bort från dagens pass.`);
-        return;
-      }
+    if (/^(rensa|töm|nollställ)\s+(schema|schemat)$/.test(text)) {
+      const keys = visibleDates.map(localDateKey);
+      setTaskAssignments((current) => current.filter((task) => !keys.includes(task.date)));
+      setPrompt('');
+      setAppTab('schedule');
+      setMessage('Schemat för den synliga perioden rensades.');
+      return;
     }
 
-    const simultaneous = text.match(/(?:antal\s+personal\s+|)(\d+)\s*(?:person(?:al|er)?|anställda?)?\s*(?:ska\s+)?(?:jobba\s+)?samtidigt/);
+    const simultaneous = text.match(/(?:antal\s+personal\s+|bemanning\s+|)(\d+)\s*(?:person(?:al|er)?|anställda?)?\s*(?:ska\s+)?(?:jobba\s+)?samtidigt/);
     if (simultaneous) {
       const count = Math.max(1, Number(simultaneous[1]));
       setBusiness((current) => ({ ...current, staffAtSameTime: count }));
-      setSidebarTab('business');
       setAppTab('business');
-      changed = true;
+      setSidebarTab('business');
+      setPrompt('');
+      setMessage(`Bemanningen ändrades till ${count} person${count === 1 ? '' : 'er'} samtidigt.`);
+      return;
     }
 
     if (employee) {
+      const absenceReason: Absence['reason'] | null =
+        /\bvab\b/.test(text) ? 'vab' :
+        /semester/.test(text) ? 'vacation' :
+        /ledig|ledighet|frånvarande|borta/.test(text) ? 'leave' :
+        /sjuk/.test(text) ? 'sick' : null;
+
+      const rangeMatch = text.match(/([a-zåäö]+)\s*(?:-|–|till)\s*([a-zåäö]+)/);
+      const singleDayMatch = text.match(/(?:sjuk|vab|semester|ledig|ledighet|frånvarande|borta)(?:\s+på)?\s+([a-zåäö]+)/);
+
+      if (absenceReason && rangeMatch) {
+        const fromKey = resolveDay(rangeMatch[1]);
+        const toKey = resolveDay(rangeMatch[2]);
+        if (fromKey && toKey && WEEKDAY_KEYS.includes(fromKey) && WEEKDAY_KEYS.includes(toKey)) {
+          const fromIndex = WEEKDAY_KEYS.indexOf(fromKey);
+          const toIndex = WEEKDAY_KEYS.indexOf(toKey);
+          const first = Math.min(fromIndex, toIndex);
+          const last = Math.max(fromIndex, toIndex);
+          for (let i = first; i <= last; i++) setAbsenceForDate(employee.id, addDays(weekStart, i), absenceReason);
+          setPrompt('');
+          setAppTab('schedule');
+          setMessage(`${employee.name} markerades ${absenceReason === 'sick' ? 'sjuk' : absenceReason === 'vab' ? 'VAB' : absenceReason === 'vacation' ? 'på semester' : 'ledig'} ${DAY_LABELS[WEEKDAY_KEYS[first]]}–${DAY_LABELS[WEEKDAY_KEYS[last]]}.`);
+          return;
+        }
+      }
+
+      if (absenceReason && singleDayMatch) {
+        const dayKey = resolveDay(singleDayMatch[1]);
+        if (dayKey && WEEKDAY_KEYS.includes(dayKey)) {
+          const date = dateForDay(dayKey);
+          setAbsenceForDate(employee.id, date, absenceReason);
+          setPrompt('');
+          setAppTab('schedule');
+          setMessage(`${employee.name} markerades ${absenceReason === 'sick' ? 'sjuk' : absenceReason === 'vab' ? 'VAB' : absenceReason === 'vacation' ? 'på semester' : 'ledig'} ${DAY_LABELS[dayKey]}.`);
+          return;
+        }
+      }
+
+      const removeAbsence = text.match(/(?:inte\s+(?:sjuk|vab|ledig)|tillbaka|kommer tillbaka|ta bort frånvaro)(?:\s+på)?\s*([a-zåäö]+)?/);
+      if (removeAbsence) {
+        const dayKey = resolveDay(removeAbsence[1]);
+        if (dayKey && WEEKDAY_KEYS.includes(dayKey)) {
+          const dateKey = localDateKey(dateForDay(dayKey));
+          setAbsences((current) => current.filter((absence) => !(absence.employeeId === employee.id && absence.date === dateKey)));
+          setPrompt('');
+          setMessage(`Frånvaron för ${employee.name} på ${DAY_LABELS[dayKey]} togs bort.`);
+          return;
+        }
+      }
+
       let next: Employee = {
         ...employee,
         days: { ...employee.days },
         overrides: { ...employee.overrides },
         projectIds: [...employee.projectIds],
       };
+      let changed = false;
 
-      const percent = text.match(/(?:jobbar|arbetar)\s+(\d{1,3})\s*%/);
+      const percent = text.match(/(?:jobbar|arbetar|sysselsättningsgrad)\s*(?:är\s*)?(\d{1,3})\s*%/);
       if (percent) {
         next.percent = Math.min(100, Math.max(0, Number(percent[1])));
         next.maxHoursWeek = (40 * next.percent) / 100;
@@ -986,16 +1040,19 @@ export default function App() {
 
       const notWork = text.match(/(?:jobbar|arbetar)\s+inte\s+(?:på\s+)?([a-zåäö]+)/);
       if (notWork) {
-        const key = SWEDISH_DAY_TO_KEY[notWork[1]];
-        if (key) {
-          next.days[key] = false;
-          changed = true;
-        }
+        const key = resolveDay(notWork[1]);
+        if (key) { next.days[key] = false; changed = true; }
+      }
+
+      const worksDay = text.match(/(?:jobbar|arbetar)\s+(?:på\s+)?([a-zåäö]+)$/);
+      if (worksDay) {
+        const key = resolveDay(worksDay[1]);
+        if (key) { next.days[key] = true; changed = true; }
       }
 
       const endMatch = text.match(/slutar\s+(?:klockan|kl\.?\s*)?\s*(\d{1,2})(?::(\d{2}))?\s+(?:på\s+)?([a-zåäö]+)/);
       if (endMatch) {
-        const key = SWEDISH_DAY_TO_KEY[endMatch[3]];
+        const key = resolveDay(endMatch[3]);
         if (key) {
           const hour = String(Math.min(23, Number(endMatch[1]))).padStart(2, '0');
           next.overrides[key] = { ...next.overrides[key], end: `${hour}:${endMatch[2] ?? '00'}` };
@@ -1005,7 +1062,7 @@ export default function App() {
 
       const startMatch = text.match(/börjar\s+(?:klockan|kl\.?\s*)?\s*(\d{1,2})(?::(\d{2}))?\s+(?:på\s+)?([a-zåäö]+)/);
       if (startMatch) {
-        const key = SWEDISH_DAY_TO_KEY[startMatch[3]];
+        const key = resolveDay(startMatch[3]);
         if (key) {
           const hour = String(Math.min(23, Number(startMatch[1]))).padStart(2, '0');
           next.overrides[key] = { ...next.overrides[key], start: `${hour}:${startMatch[2] ?? '00'}` };
@@ -1013,112 +1070,114 @@ export default function App() {
         }
       }
 
-      if (/bör\s+inte\s+öppna\s+(?:två|2)\s+dagar\s+i\s+rad/.test(text)) {
-        next.avoidConsecutiveOpen = true;
+      const normalHours = text.match(/(?:jobbar|arbetar|normal tid|arbetstid).*?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till)\s*(\d{1,2})(?::(\d{2}))?/);
+      if (normalHours && !text.match(/[a-zåäö]+\s*(?:-|–|till)\s*[a-zåäö]+/)) {
+        next.defaultStart = `${String(Number(normalHours[1])).padStart(2, '0')}:${normalHours[2] ?? '00'}`;
+        next.defaultEnd = `${String(Number(normalHours[3])).padStart(2, '0')}:${normalHours[4] ?? '00'}`;
         changed = true;
       }
 
-      if (/bör\s+inte\s+stänga\s+(?:två|2)\s+dagar\s+i\s+rad/.test(text)) {
-        next.avoidConsecutiveClose = true;
-        changed = true;
-      }
+      if (/bör\s+inte\s+öppna\s+(?:två|2|flera)\s+dagar\s+i\s+rad/.test(text)) { next.avoidConsecutiveOpen = true; changed = true; }
+      if (/bör\s+inte\s+stänga\s+(?:två|2|flera)\s+dagar\s+i\s+rad/.test(text)) { next.avoidConsecutiveClose = true; changed = true; }
 
       const maxDay = text.match(/max(?:imalt)?\s+(\d+(?:[.,]\d+)?)\s+timmar\s+(?:per|om)\s+dag/);
-      if (maxDay) {
-        next.maxHoursDay = Number(maxDay[1].replace(',', '.'));
-        changed = true;
-      }
-
-      const maxPassPerson = text.match(
-        /(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/
-      );
-      if (maxPassPerson) {
-        next.maxHoursDay = Number(maxPassPerson[1].replace(',', '.'));
-        changed = true;
-      }
+      if (maxDay) { next.maxHoursDay = Number(maxDay[1].replace(',', '.')); changed = true; }
 
       if (changed) {
-        setEmployees((current) => current.map((e) => (e.id === employee.id ? next : e)));
+        setEmployees((current) => current.map((e) => e.id === employee.id ? next : e));
         setSelectedEmployeeId(employee.id);
         setSidebarTab('person');
+        setAppTab('staff');
+        setPrompt('');
+        setMessage(`Inställningarna för ${employee.name} uppdaterades.`);
+        return;
       }
     }
 
     const lunchTime = text.match(/lunch(?:en)?\s+(?:är\s+|ska\s+vara\s+)?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till)\s*(\d{1,2})(?::(\d{2}))?/);
     if (lunchTime) {
-      const start = `${String(Number(lunchTime[1])).padStart(2, '0')}:${lunchTime[2] ?? '00'}`;
-      const end = `${String(Number(lunchTime[3])).padStart(2, '0')}:${lunchTime[4] ?? '00'}`;
-      const durationMinutes = Math.max(0, toMinutes(end) - toMinutes(start));
-      setBusiness((current) => ({
-        ...current,
-        lunch: {
-          ...current.lunch,
-          enabled: true,
-          windowStart: start,
-          windowEnd: end,
-          durationMinutes,
-        },
-      }));
-      changed = true;
-      setSidebarTab('business');
+      const startTime = `${String(Number(lunchTime[1])).padStart(2, '0')}:${lunchTime[2] ?? '00'}`;
+      const endTime = `${String(Number(lunchTime[3])).padStart(2, '0')}:${lunchTime[4] ?? '00'}`;
+      const durationMinutes = Math.max(0, toMinutes(endTime) - toMinutes(startTime));
+      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: true, windowStart: startTime, windowEnd: endTime, durationMinutes } }));
+      setPrompt('');
+      setMessage(`Lunch ändrades till ${startTime}–${endTime}.`);
+      return;
     }
 
     const lunchDuration = text.match(/lunch(?:en)?\s+(?:är\s+)?(\d{1,3})\s*min/);
     if (lunchDuration) {
       const durationMinutes = Number(lunchDuration[1]);
-      setBusiness((current) => ({
-        ...current,
-        lunch: {
-          ...current.lunch,
-          enabled: true,
-          durationMinutes,
-          windowEnd: addMinutesTime(current.lunch.windowStart, durationMinutes),
-        },
-      }));
-      changed = true;
-      setSidebarTab('business');
-    }
-
-    const businessDay = text.match(
-      /(?:öppet|öppettid(?:er)?)\s+(?:på\s+)?([a-zåäö]+).*?(\d{1,2})(?::(\d{2}))?\s*(?:-|till)\s*(\d{1,2})(?::(\d{2}))?/
-    );
-    if (businessDay) {
-      const key = SWEDISH_DAY_TO_KEY[businessDay[1]];
-      if (key) {
-        const start = `${String(Number(businessDay[2])).padStart(2, '0')}:${businessDay[3] ?? '00'}`;
-        const end = `${String(Number(businessDay[4])).padStart(2, '0')}:${businessDay[5] ?? '00'}`;
-        setBusiness((current) => ({
-          ...current,
-          days: { ...current.days, [key]: { open: true, start, end } },
-        }));
-        changed = true;
-        setSidebarTab('business');
-      }
-    }
-
-    const globalMaxPass = text.match(
-      /(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/
-    );
-    if (globalMaxPass && mentionedProject) {
-      updateProject(mentionedProject.id, { maxShiftHours: Number(globalMaxPass[1].replace(',', '.')) });
-      setSelectedProjectId(mentionedProject.id);
-      setSidebarTab('projects');
-      changed = true;
-    } else if (globalMaxPass && !employee) {
-      setBusiness((current) => ({ ...current, maxShiftHours: Number(globalMaxPass[1].replace(',', '.')) }));
-      changed = true;
-      setSidebarTab('business');
-    }
-
-    if (!changed) {
-      setMessage(
-        'Jag kunde inte tolka regeln ännu. Prova t.ex. “Anna jobbar inte fredagar”, “Reception maxpass 3 timmar”, “lunch 12-12:30” eller “öppet onsdag 07-19”.'
-      );
+      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: true, durationMinutes, windowEnd: addMinutesTime(current.lunch.windowStart, durationMinutes) } }));
+      setPrompt('');
+      setMessage(`Lunchlängden ändrades till ${durationMinutes} minuter.`);
       return;
     }
 
-    setPrompt('');
-    setMessage('Regeln uppdaterades.');
+    if (/ingen lunch|stäng av lunch|utan lunch/.test(text)) {
+      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: false } }));
+      setPrompt('');
+      setMessage('Lunchregeln stängdes av.');
+      return;
+    }
+
+    if (/använd lunch|slå på lunch|aktivera lunch/.test(text)) {
+      setBusiness((current) => ({ ...current, lunch: { ...current.lunch, enabled: true } }));
+      setPrompt('');
+      setMessage('Lunchregeln aktiverades.');
+      return;
+    }
+
+    const businessDay = text.match(/(?:öppet|öppettid(?:er)?|arbetsdag)\s+(?:på\s+)?([a-zåäö]+).*?(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till)\s*(\d{1,2})(?::(\d{2}))?/);
+    if (businessDay) {
+      const key = resolveDay(businessDay[1]);
+      if (key) {
+        const startTime = `${String(Number(businessDay[2])).padStart(2, '0')}:${businessDay[3] ?? '00'}`;
+        const endTime = `${String(Number(businessDay[4])).padStart(2, '0')}:${businessDay[5] ?? '00'}`;
+        setBusiness((current) => ({ ...current, days: { ...current.days, [key]: { open: true, start: startTime, end: endTime } } }));
+        setPrompt('');
+        setMessage(`${DAY_LABELS[key]} ändrades till ${startTime}–${endTime}.`);
+        return;
+      }
+    }
+
+    const projectHours = text.match(/(?:projekt(?:et)?\s+)?(?:öppet|tid|tider|arbetstid)?\s*(\d{1,2})(?::(\d{2}))?\s*(?:-|–|till)\s*(\d{1,2})(?::(\d{2}))?/);
+    if (mentionedProject && projectHours) {
+      const startTime = `${String(Number(projectHours[1])).padStart(2, '0')}:${projectHours[2] ?? '00'}`;
+      const endTime = `${String(Number(projectHours[3])).padStart(2, '0')}:${projectHours[4] ?? '00'}`;
+      updateProject(mentionedProject.id, { start: startTime, end: endTime });
+      setSelectedProjectId(mentionedProject.id);
+      setPrompt('');
+      setMessage(`${mentionedProject.name} ändrades till ${startTime}–${endTime}.`);
+      return;
+    }
+
+    const maxPass = text.match(/(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass|pass max)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/);
+    if (maxPass) {
+      const hours = Number(maxPass[1].replace(',', '.'));
+      if (mentionedProject) {
+        updateProject(mentionedProject.id, { maxShiftHours: hours });
+        setSelectedProjectId(mentionedProject.id);
+        setMessage(`${mentionedProject.name} fick maxpass ${hours} h.`);
+      } else if (selectedProject) {
+        updateProject(selectedProject.id, { maxShiftHours: hours });
+        setMessage(`${selectedProject.name} fick maxpass ${hours} h.`);
+      }
+      setPrompt('');
+      return;
+    }
+
+    const minPass = text.match(/(?:min(?:sta)?\s+pass|minpass)\s+(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/);
+    if (minPass && (mentionedProject ?? selectedProject)) {
+      const project = mentionedProject ?? selectedProject!;
+      const hours = Number(minPass[1].replace(',', '.'));
+      updateProject(project.id, { minShiftHours: hours });
+      setPrompt('');
+      setMessage(`${project.name} fick minpass ${hours} h.`);
+      return;
+    }
+
+    setMessage('Jag kunde inte tolka instruktionen. Exempel: “skapa schema”, “Erik sjuk måndag”, “Anna VAB tisdag”, “Sara semester onsdag-fredag”, “2 personal samtidigt”, “Reception maxpass 3 timmar”, “lunch 12-12:30”.');
   }
 
   function autoFillVisible() {
