@@ -9,12 +9,18 @@ type WorkTime = {
   end: string;
 };
 
+type BlockedTime = {
+  start: string;
+  end: string;
+};
+
 type Staff = {
   id: string;
   name: string;
   color: string;
   days: Record<DayKey, boolean>;
   workTimes: Record<DayKey, WorkTime>;
+  blockedTimes: Record<DayKey, BlockedTime[]>;
 };
 
 type Assignment = {
@@ -68,6 +74,20 @@ function defaultWorkTimes(): Record<DayKey, WorkTime> {
     thu: { start: WORK_START, end: WORK_END },
     fri: { start: WORK_START, end: WORK_END },
   };
+}
+
+function defaultBlockedTimes(): Record<DayKey, BlockedTime[]> {
+  return {
+    mon: [],
+    tue: [],
+    wed: [],
+    thu: [],
+    fri: [],
+  };
+}
+
+function overlapsTime(start: string, end: string, blocked: BlockedTime) {
+  return toMinutes(start) < toMinutes(blocked.end) && toMinutes(end) > toMinutes(blocked.start);
 }
 
 function lunchMinutesInside(start: string, end: string) {
@@ -130,6 +150,7 @@ const defaultStaff: Staff[] = [
     color: COLORS[0],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
     workTimes: defaultWorkTimes(),
+    blockedTimes: defaultBlockedTimes(),
   },
   {
     id: 'erik',
@@ -137,6 +158,7 @@ const defaultStaff: Staff[] = [
     color: COLORS[1],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
     workTimes: defaultWorkTimes(),
+    blockedTimes: defaultBlockedTimes(),
   },
   {
     id: 'sara',
@@ -144,6 +166,7 @@ const defaultStaff: Staff[] = [
     color: COLORS[2],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
     workTimes: defaultWorkTimes(),
+    blockedTimes: defaultBlockedTimes(),
   },
 ];
 
@@ -387,6 +410,13 @@ export default function App() {
           thu: person.workTimes?.thu ?? { start: '08:00', end: '16:30' },
           fri: person.workTimes?.fri ?? { start: '08:00', end: '16:30' },
         },
+        blockedTimes: {
+          mon: person.blockedTimes?.mon ?? [],
+          tue: person.blockedTimes?.tue ?? [],
+          wed: person.blockedTimes?.wed ?? [],
+          thu: person.blockedTimes?.thu ?? [],
+          fri: person.blockedTimes?.fri ?? [],
+        },
       }));
     }
 
@@ -406,6 +436,7 @@ export default function App() {
             fri: person.days?.fri ?? true,
           },
           workTimes: defaultWorkTimes(),
+    blockedTimes: defaultBlockedTimes(),
         }));
       } catch {
         return defaultStaff;
@@ -513,6 +544,12 @@ export default function App() {
         ? LUNCH_END
         : workTime.start;
     const end = contiguousShiftEnd(start, workTime.end, shiftLengthMinutes);
+    const blocked = person.blockedTimes?.[day] ?? [];
+
+    if (blocked.some((period) => overlapsTime(start, end, period))) {
+      setMessage(`${person.name} är inte tillgänglig under hela det passet på ${DAY_LABELS[day]}.`);
+      return;
+    }
 
     setAssignments((current) => {
       const exists = current.some(
@@ -615,7 +652,12 @@ export default function App() {
           .filter((person) => {
             if (!person.days[day]) return false;
             const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
-            return toMinutes(availability.start) <= slotStart && toMinutes(availability.end) >= slotEnd;
+            const blocked = person.blockedTimes?.[day] ?? [];
+            return (
+              toMinutes(availability.start) <= slotStart &&
+              toMinutes(availability.end) >= slotEnd &&
+              !blocked.some((period) => overlapsTime(slotStartTime, actualEndTime, period))
+            );
           })
           .map((person) => {
             const previous = lastWorkedSlot[person.id];
@@ -741,6 +783,44 @@ export default function App() {
       const date = addDays(weekStart, DAY_KEYS.indexOf(dayKey));
       const dateKey = localDateKey(date);
 
+      const cannotWorkAt = text.match(/kan\s+inte\s+(?:jobba|arbeta)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      if (cannotWorkAt) {
+        const hour = Math.min(23, Number(cannotWorkAt[1]));
+        const minute = Number(cannotWorkAt[2] ?? 0);
+        const startMinutes = hour * 60 + minute;
+        const endMinutes = Math.min(24 * 60, startMinutes + 60);
+        const blockedStart = minutesToTime(startMinutes);
+        const blockedEnd = minutesToTime(endMinutes);
+
+        setStaff((current) =>
+          current.map((item) => {
+            if (item.id !== person.id) return item;
+            const existing = item.blockedTimes?.[dayKey] ?? [];
+            const duplicate = existing.some((period) => period.start === blockedStart && period.end === blockedEnd);
+            return duplicate
+              ? item
+              : {
+                  ...item,
+                  blockedTimes: {
+                    ...item.blockedTimes,
+                    [dayKey]: [...existing, { start: blockedStart, end: blockedEnd }],
+                  },
+                };
+          })
+        );
+
+        setAssignments((current) =>
+          current.filter((assignment) => {
+            if (assignment.employeeId !== person.id || assignment.date !== dateKey) return true;
+            return !overlapsTime(assignment.start, assignment.end, { start: blockedStart, end: blockedEnd });
+          })
+        );
+
+        setMessage(`${person.name} kan inte jobba ${blockedStart}–${blockedEnd} på ${DAY_LABELS[dayKey]}. Regeln gäller återkommande varje ${dayWord}.`);
+        setPrompt('');
+        return;
+      }
+
       if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande/.test(text)) {
         setAssignments((current) =>
           current.filter((assignment) => !(assignment.employeeId === person.id && assignment.date === dateKey))
@@ -768,6 +848,7 @@ export default function App() {
       color: COLORS[staff.length % COLORS.length],
       days: { mon: true, tue: true, wed: true, thu: true, fri: true },
     workTimes: defaultWorkTimes(),
+    blockedTimes: defaultBlockedTimes(),
     };
     setStaff((current) => [...current, person]);
   }
@@ -805,7 +886,7 @@ export default function App() {
         <section className="prompt-bar">
           <div className="prompt-copy">
             <strong>Vad vill du göra?</strong>
-            <span>Exempel: “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag”</span>
+            <span>Exempel: “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag”, “Erik kan inte jobba kl 11 på måndagar”</span>
           </div>
           <div className="prompt-input-row">
             <input
@@ -973,6 +1054,21 @@ export default function App() {
                           </label>
                           <button className="delete-person" onClick={() => deleteStaff(person.id)}>Ta bort</button>
                         </div>
+
+                        {DAY_KEYS.some((day) => (person.blockedTimes?.[day] ?? []).length > 0) && (
+                          <div className="blocked-times">
+                            <strong>Återkommande begränsningar</strong>
+                            <div>
+                              {DAY_KEYS.flatMap((day) =>
+                                (person.blockedTimes?.[day] ?? []).map((period, index) => (
+                                  <span key={`${day}-${period.start}-${index}`}>
+                                    {DAY_LABELS[day]} {period.start}–{period.end}
+                                  </span>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="worktime-list">
                           {DAY_KEYS.map((day) => {
