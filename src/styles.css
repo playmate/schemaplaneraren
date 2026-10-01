@@ -892,6 +892,25 @@ input:focus {
   background: #450a0a;
 }
 
+.schedule-footer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reset-all-button {
+  border: 1px solid #991b1b;
+  background: #450a0a;
+  color: #fee2e2;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-weight: 800;
+}
+
+.reset-all-button:hover {
+  background: #7f1d1d;
+}
+
 .remove-assignment {
   position: absolute;
   top: 5px;
