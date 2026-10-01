@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.20';
+const APP_VERSION = '0.1.21';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -642,14 +642,21 @@ function DraggableAssignmentCard({
          >
           <span className="assignment-warning-icon" aria-hidden="true">!</span>
           <span className="assignment-warning-tooltip" role="tooltip">
-            {warnings.map((warning) => (
-              <span
-                key={warning}
-                className={warning.startsWith('Tips:') ? 'assignment-warning-tip' : undefined}
-              >
-                {warning}
+            <span className="assignment-warning-title">Varning</span>
+            <span className="assignment-warning-reasons">
+              {warnings
+                .filter((warning) => !warning.startsWith('Tips:'))
+                .map((warning) => (
+                  <span key={warning} className="assignment-warning-reason">
+                    {warning}
+                  </span>
+                ))}
+            </span>
+            {warnings.some((warning) => warning.startsWith('Tips:')) && (
+              <span className="assignment-warning-tip">
+                {warnings.find((warning) => warning.startsWith('Tips:'))?.replace(/^Tips:\s*/, '')}
               </span>
-            ))}
+            )}
           </span>
         </span>
       )}
@@ -693,8 +700,10 @@ function EmptyShiftDropZone({
         <span className="empty-slot-warning">
           <span className="empty-slot-warning-icon" aria-hidden="true">!</span>
           <span className="empty-slot-warning-tooltip" role="tooltip">
-            <strong>Tomt pass</strong>
-            <span className="empty-slot-warning-tip">{suggestion}</span>
+            <span className="empty-slot-warning-title">Tomt pass</span>
+            <span className="empty-slot-warning-tip">
+              {suggestion.replace(/^Förslag:\s*/, '')}
+            </span>
           </span>
         </span>
       )}
