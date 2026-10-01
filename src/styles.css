@@ -244,6 +244,17 @@ input:focus {
   font-variant-numeric: tabular-nums;
 }
 
+.hours-imbalance-note {
+  margin-top: 9px;
+  padding: 9px 10px;
+  border: 1px solid #3f3f46;
+  border-radius: 9px;
+  background: #18181b;
+  color: #cbd5e1;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .staff-chip {
   display: grid;
   grid-template-columns: 34px 1fr;
