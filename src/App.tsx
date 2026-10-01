@@ -536,6 +536,58 @@ export default function App() {
     return totals;
   }, [assignments, staff, visibleDateKeys]);
 
+  const hourImbalanceNote = useMemo(() => {
+    if (staff.length < 2) return '';
+
+    const ranked = staff
+      .map((person) => ({ person, hours: scheduledHoursByPerson[person.id] ?? 0 }))
+      .sort((a, b) => b.hours - a.hours);
+
+    const highest = ranked[0];
+    const lowest = ranked[ranked.length - 1];
+
+    if (!highest || !lowest || highest.hours <= 0) return '';
+
+    const differencePercent =
+      lowest.hours <= 0
+        ? 100
+        : ((highest.hours - lowest.hours) / lowest.hours) * 100;
+
+    if (differencePercent < 25) return '';
+
+    const reasons: string[] = [];
+    const highDays = DAY_KEYS.filter((day) => highest.person.days[day]).length;
+    const lowDays = DAY_KEYS.filter((day) => lowest.person.days[day]).length;
+    const lowBlocked = DAY_KEYS.reduce(
+      (sum, day) => sum + (lowest.person.blockedTimes?.[day]?.length ?? 0),
+      0
+    );
+
+    if (lowDays < highDays) reasons.push(`${lowest.person.name} är tillgänglig färre dagar`);
+    if (lowBlocked > 0) reasons.push(`${lowest.person.name} har tidsbegränsningar`);
+
+    const lowHasShorterDays = DAY_KEYS.some((day) => {
+      if (!lowest.person.days[day]) return false;
+      const lowTime = lowest.person.workTimes[day];
+      const highTime = highest.person.workTimes[day];
+      return (
+        lowTime &&
+        highTime &&
+        netWorkMinutes(lowTime.start, lowTime.end) < netWorkMinutes(highTime.start, highTime.end)
+      );
+    });
+
+    if (lowHasShorterDays) reasons.push(`${lowest.person.name} har kortare arbetstider vissa dagar`);
+
+    if (reasons.length === 0) {
+      reasons.push('reglerna om max ett pass per dag och jämn fördelning begränsar alternativen');
+    }
+
+    const percentText = lowest.hours <= 0 ? 'klart fler' : `${Math.round(differencePercent)} % fler`;
+
+    return `${highest.person.name} har ${percentText} schemalagda timmar än ${lowest.person.name}, främst eftersom ${reasons.join(' och ')}.`;
+  }, [staff, scheduledHoursByPerson]);
+
   function assignPerson(employeeId: string, dateKey: string) {
     const person = staff.find((item) => item.id === employeeId);
     if (!person) return;
@@ -1000,6 +1052,9 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {hourImbalanceNote && (
+                  <div className="hours-imbalance-note">{hourImbalanceNote}</div>
+                )}
               </div>
             </aside>
 
