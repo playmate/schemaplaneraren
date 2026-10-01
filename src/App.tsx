@@ -18,6 +18,7 @@ type Staff = {
 };
 
 type Assignment = {
+  id: string;
   employeeId: string;
   date: string;
   start: string;
@@ -205,7 +206,7 @@ function DayColumn({
   date: Date;
   staff: Staff[];
   assignments: Assignment[];
-  onRemove: (employeeId: string, date: string) => void;
+  onRemove: (assignmentId: string) => void;
 }) {
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
@@ -261,7 +262,7 @@ function DayColumn({
 
             return (
               <div
-                key={person.id}
+                key={assignment.id}
                 className="assignment-card"
                 style={{
                   top,
@@ -274,7 +275,7 @@ function DayColumn({
                 <button
                   className="remove-assignment"
                   title="Ta bort"
-                  onClick={() => onRemove(person.id, dateKey)}
+                  onClick={() => onRemove(assignment.id)}
                 >
                   ×
                 </button>
@@ -349,7 +350,8 @@ export default function App() {
     const saved = localStorage.getItem('scheduler-simple-assignments-v1');
     if (!saved) return [];
     const parsed: Array<Partial<Assignment> & { employeeId: string; date: string }> = JSON.parse(saved);
-    return parsed.map((assignment) => ({
+    return parsed.map((assignment, index) => ({
+      id: assignment.id ?? `legacy-${assignment.date}-${assignment.employeeId}-${index}`,
       employeeId: assignment.employeeId,
       date: assignment.date,
       start: assignment.start ?? WORK_START,
@@ -396,18 +398,20 @@ export default function App() {
         (assignment) => assignment.employeeId === employeeId && assignment.date === dateKey
       );
       if (exists) return current;
-      return [...current, { employeeId, date: dateKey, start: workTime.start, end }];
+      return [...current, {
+        id: `manual-${Date.now()}-${employeeId}`,
+        employeeId,
+        date: dateKey,
+        start: workTime.start,
+        end,
+      }];
     });
 
     setMessage(`${person.name} lades till ${DAY_LABELS[day]}.`);
   }
 
-  function removeAssignment(employeeId: string, date: string) {
-    setAssignments((current) =>
-      current.filter(
-        (assignment) => !(assignment.employeeId === employeeId && assignment.date === date)
-      )
-    );
+  function removeAssignment(assignmentId: string) {
+    setAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
   }
 
   function handleDragEnd(event: any) {
@@ -424,29 +428,64 @@ export default function App() {
   function generateSimpleSchedule() {
     const weekKeys = visibleDates.map(localDateKey);
     const generated: Assignment[] = [];
-    const counts: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const assignedMinutes: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const coverageGaps: string[] = [];
 
     for (const date of visibleDates) {
       const day = getDayKey(date);
       const dateKey = localDateKey(date);
-      const available = staff
-        .filter((person) => person.days[day])
-        .sort((a, b) => (counts[a.id] ?? 0) - (counts[b.id] ?? 0) || a.name.localeCompare(b.name, 'sv'));
+      let slotStart = toMinutes(WORK_START);
+      const workdayEnd = toMinutes(WORK_END);
+      let slotIndex = 0;
 
-      const chosen = available[0];
-      if (!chosen) continue;
+      while (slotStart < workdayEnd) {
+        const slotStartTime = minutesToTime(slotStart);
+        const slotEndTime = endForNetDuration(slotStartTime, WORK_END, shiftLengthMinutes);
+        const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
 
-      const workTime = chosen.workTimes[day] ?? { start: WORK_START, end: WORK_END };
-      const end = endForNetDuration(workTime.start, workTime.end, shiftLengthMinutes);
-      generated.push({ employeeId: chosen.id, date: dateKey, start: workTime.start, end });
-      counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
+        if (slotEnd <= slotStart) break;
+
+        const candidates = staff
+          .filter((person) => {
+            if (!person.days[day]) return false;
+            const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+            return toMinutes(availability.start) <= slotStart && toMinutes(availability.end) >= slotEnd;
+          })
+          .sort((a, b) =>
+            (assignedMinutes[a.id] ?? 0) - (assignedMinutes[b.id] ?? 0) ||
+            a.name.localeCompare(b.name, 'sv')
+          );
+
+        const chosen = candidates[0];
+
+        if (chosen) {
+          generated.push({
+            id: `auto-${dateKey}-${slotIndex}-${chosen.id}`,
+            employeeId: chosen.id,
+            date: dateKey,
+            start: slotStartTime,
+            end: minutesToTime(slotEnd),
+          });
+          assignedMinutes[chosen.id] = (assignedMinutes[chosen.id] ?? 0) + netWorkMinutes(slotStartTime, minutesToTime(slotEnd));
+        } else {
+          coverageGaps.push(`${DAY_LABELS[day]} ${slotStartTime}–${minutesToTime(slotEnd)}`);
+        }
+
+        slotStart = slotEnd;
+        slotIndex += 1;
+      }
     }
 
     setAssignments((current) => [
       ...current.filter((assignment) => !weekKeys.includes(assignment.date)),
       ...generated,
     ]);
-    setMessage(`Veckoschemat skapades med passlängd ${durationLabel(shiftLengthMinutes)}.`);
+
+    if (coverageGaps.length) {
+      setMessage(`Schemat skapades, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`);
+    } else {
+      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)}.`);
+    }
   }
 
   function resetVisibleSchedule() {
@@ -492,7 +531,9 @@ export default function App() {
       const dateKey = localDateKey(date);
 
       if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande/.test(text)) {
-        removeAssignment(person.id, dateKey);
+        setAssignments((current) =>
+          current.filter((assignment) => !(assignment.employeeId === person.id && assignment.date === dateKey))
+        );
         setMessage(`${person.name} togs bort från ${DAY_LABELS[dayKey]}.`);
         setPrompt('');
         return;
