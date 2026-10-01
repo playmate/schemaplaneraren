@@ -276,16 +276,34 @@ input:focus {
   font-size: 11px;
 }
 
+.hours-summary-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 58px;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 0 9px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.hours-summary-columns span:nth-child(2),
+.hours-summary-columns span:nth-child(3) {
+  text-align: right;
+}
+
 .hours-summary-list {
   display: grid;
   gap: 7px;
-  margin-top: 9px;
+  margin-top: 5px;
 }
 
 .hours-summary-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px 58px;
+  gap: 6px;
   align-items: center;
   padding: 8px 9px;
   border: 1px solid #263244;
@@ -312,6 +330,11 @@ input:focus {
 .hours-summary-row strong {
   color: #f8fafc;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.hours-summary-row .month-hours {
+  color: #cbd5e1;
 }
 
 .hours-imbalance-note {
