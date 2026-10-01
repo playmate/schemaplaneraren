@@ -2019,3 +2019,30 @@ input:focus {
     justify-content: flex-start;
   }
 }
+
+
+.staff-settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reset-staff-button {
+  border: 1px solid #7f1d1d;
+  background: #2a0c0c;
+  color: #fecaca;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-weight: 800;
+}
+
+.reset-staff-button:hover {
+  background: #450a0a;
+}
+
+@media (max-width: 620px) {
+  .staff-settings-actions {
+    justify-content: flex-start;
+  }
+}
