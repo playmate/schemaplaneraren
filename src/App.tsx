@@ -600,34 +600,82 @@ export default function App() {
       return;
     }
 
-    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
-    const start =
-      toMinutes(workTime.start) >= toMinutes(LUNCH_START) && toMinutes(workTime.start) < toMinutes(LUNCH_END)
-        ? LUNCH_END
-        : workTime.start;
-    const end = contiguousShiftEnd(start, workTime.end, shiftLengthMinutes);
-    const blocked = person.blockedTimes?.[day] ?? [];
-
-    if (blocked.some((period) => overlapsTime(start, end, period))) {
-      setMessage(`${person.name} är inte tillgänglig under hela det passet på ${DAY_LABELS[day]}.`);
+    if (assignments.some((assignment) => assignment.employeeId === employeeId && assignment.date === dateKey)) {
+      setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[day]}. Max ett pass per dag.`);
       return;
     }
 
-    setAssignments((current) => {
-      const exists = current.some(
-        (assignment) => assignment.employeeId === employeeId && assignment.date === dateKey
+    const dayAssignments = assignments.filter((assignment) => assignment.date === dateKey);
+    const candidateSlots: Array<{ start: string; end: string }> = [];
+    let slotStart = toMinutes(WORK_START);
+    const workdayEnd = toMinutes(WORK_END);
+
+    while (slotStart < workdayEnd) {
+      if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+        slotStart = toMinutes(LUNCH_END);
+        continue;
+      }
+
+      const start = minutesToTime(slotStart);
+      const end = contiguousShiftEnd(start, WORK_END, shiftLengthMinutes);
+      const endMinutes = Math.min(workdayEnd, toMinutes(end));
+
+      if (endMinutes <= slotStart) break;
+
+      candidateSlots.push({ start, end: minutesToTime(endMinutes) });
+      slotStart = endMinutes;
+
+      if (slotStart === toMinutes(LUNCH_START)) {
+        slotStart = toMinutes(LUNCH_END);
+      }
+    }
+
+    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const blocked = person.blockedTimes?.[day] ?? [];
+
+    const availableSlot = candidateSlots.find((slot) => {
+      const alreadyScheduled = dayAssignments.some((assignment) =>
+        overlapsTime(slot.start, slot.end, { start: assignment.start, end: assignment.end })
       );
-      if (exists) return current;
-      return [...current, {
+
+      if (alreadyScheduled) return false;
+
+      return (
+        toMinutes(workTime.start) <= toMinutes(slot.start) &&
+        toMinutes(workTime.end) >= toMinutes(slot.end) &&
+        !blocked.some((period) => overlapsTime(slot.start, slot.end, period))
+      );
+    });
+
+    if (!availableSlot) {
+      const hasAnyGap = candidateSlots.some((slot) =>
+        !dayAssignments.some((assignment) =>
+          overlapsTime(slot.start, slot.end, { start: assignment.start, end: assignment.end })
+        )
+      );
+
+      setMessage(
+        hasAnyGap
+          ? `Det finns ett ledigt pass på ${DAY_LABELS[day]}, men ${person.name} är inte tillgänglig då.`
+          : `Det finns inget oschemalagt pass kvar på ${DAY_LABELS[day]}.`
+      );
+      return;
+    }
+
+    setAssignments((current) => [
+      ...current,
+      {
         id: `manual-${Date.now()}-${employeeId}`,
         employeeId,
         date: dateKey,
-        start,
-        end,
-      }];
-    });
+        start: availableSlot.start,
+        end: availableSlot.end,
+      },
+    ]);
 
-    setMessage(`${person.name} lades till ${DAY_LABELS[day]}.`);
+    setMessage(
+      `${person.name} lades i det lediga passet ${availableSlot.start}–${availableSlot.end} på ${DAY_LABELS[day]}.`
+    );
   }
 
   function removeAssignment(assignmentId: string) {
@@ -694,6 +742,15 @@ export default function App() {
 
     if (sourceId.startsWith('staff:') && targetId.startsWith('day:')) {
       assignPerson(sourceId.replace('staff:', ''), targetId.replace('day:', ''));
+      return;
+    }
+
+    if (sourceId.startsWith('staff:') && targetId.startsWith('assignment:')) {
+      const targetAssignmentId = targetId.replace('assignment:', '');
+      const targetAssignment = assignments.find((assignment) => assignment.id === targetAssignmentId);
+      if (!targetAssignment) return;
+
+      assignPerson(sourceId.replace('staff:', ''), targetAssignment.date);
     }
   }
 
