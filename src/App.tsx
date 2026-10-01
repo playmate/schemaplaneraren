@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.22';
+const APP_VERSION = '0.1.23';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -2642,6 +2642,63 @@ export default function App() {
       const date = addDays(weekStart, DAY_KEYS.indexOf(dayKey));
       const dateKey = localDateKey(date);
 
+      const recurringDayOff = text.match(
+        /^(?:.+?\s+)?(?:jobbar|arbetar)\s+inte\s+(måndagar|tisdagar|onsdagar|torsdagar|tordagar|fredagar)\.?$/
+      );
+
+      if (recurringDayOff) {
+        setStaff((current) =>
+          current.map((item) =>
+            item.id === person.id
+              ? {
+                  ...item,
+                  days: {
+                    ...item.days,
+                    [dayKey]: false,
+                  },
+                }
+              : item
+          )
+        );
+
+        setMessage(
+          `${person.name} jobbar inte ${recurringDayOff[1]}. Dagen avmarkerades i Personal.`
+        );
+        setPrompt('');
+        return;
+      }
+
+      const singleDayUnavailable = /kan\s+inte\s+(?:jobba|arbeta)\s+(?:på\s+)?(måndag|tisdag|onsdag|torsdag|tordag|fredag)\.?$/.test(text);
+
+      if (singleDayUnavailable) {
+        if (tab !== 'schedule') {
+          setMessage('Öppna fliken Schema för att ta bort personen från en specifik dag i den visade veckan.');
+        } else {
+          const matchingAssignments = assignments.filter(
+            (assignment) =>
+              assignment.employeeId === person.id &&
+              assignment.date === dateKey
+          );
+
+          if (matchingAssignments.length === 0) {
+            setMessage(
+              `${person.name} har inget pass på ${DAY_LABELS[dayKey]} i den visade veckan.`
+            );
+          } else {
+            const removeIds = new Set(matchingAssignments.map((assignment) => assignment.id));
+            setAssignments((current) =>
+              current.filter((assignment) => !removeIds.has(assignment.id))
+            );
+            setMessage(
+              `${person.name} togs bort från ${DAY_LABELS[dayKey]} i den visade veckan. Passet lämnades tomt.`
+            );
+          }
+        }
+
+        setPrompt('');
+        return;
+      }
+
       const startsAt = text.match(/(?:börjar|startar|kan\s+börja|jobbar\s+från|arbetar\s+från)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
       if (startsAt) {
         const time = normalizeClock(startsAt[1], startsAt[2]);
@@ -2898,7 +2955,8 @@ export default function App() {
                 <div><strong>Skapa/gör om en dag</strong><span>“fyll torsdag” · “skapa torsdag” · “schemalägg torsdag” · “gör om fredag” · “generera om tisdag”</span></div>
                 <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” (aktuell vecka) · “nollställ alla scheman” (alla veckor)</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
-                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
+                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag” · “Anna kan inte jobba onsdag”</span></div>
+                <div><strong>Återkommande arbetsdagar</strong><span>“Anna jobbar inte onsdagar” · “Erik arbetar inte fredagar”</span></div>
                 <div><strong>Ta bort utan ersättare</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag” · “radera Sara från måndag”</span></div>
                 <div><strong>Ta bort utan återfyllnad</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag”</span></div>
                 <div><strong>Börjar senare</strong><span>“Anna börjar 12 på onsdag” · “Erik startar kl 10 torsdag”</span></div>
