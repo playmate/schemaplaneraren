@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.26';
+const APP_VERSION = '0.1.27';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -401,6 +401,10 @@ function getAssignmentWarnings(
       uniqueWarnings.push(
         `Tips: ersätt passet med ${bestAlternative.candidate.name} för en jämnare timfördelning.`
       );
+    } else {
+      uniqueWarnings.push(
+        'Tips: inget bättre byte hittades som förbättrar schemat utan att skapa en ny konflikt.'
+      );
     }
   }
 
@@ -499,7 +503,7 @@ function getEmptySlotSuggestion(
     );
 
   const best = candidates[0];
-  if (!best) return 'Ingen tillgänglig person hittades för passet.';
+  if (!best) return 'Inget bra förslag hittades – ingen tillgänglig person kan ta passet utan att bryta mot nuvarande regler.';
 
   return best.boundaryPenalty === 0
     ? `Förslag: lägg ${best.person.name} på passet för jämnast möjlig timfördelning.`
