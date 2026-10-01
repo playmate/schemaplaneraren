@@ -218,9 +218,20 @@ function getIsoWeek(date: Date) {
 function DraggableStaff({ person }: { person: Staff }) {
   const { ref, handleRef } = useDraggable({ id: `staff:${person.id}` });
 
+  const setRefs = (node: HTMLDivElement | null) => {
+    ref(node);
+    handleRef(node);
+  };
+
   return (
-    <div ref={ref} className="staff-chip" style={{ borderLeftColor: person.color }}>
-      <button ref={handleRef} className="drag-handle" aria-label={`Dra ${person.name}`}>⋮⋮</button>
+    <div
+      ref={setRefs}
+      className="staff-chip staff-chip-draggable"
+      style={{ borderLeftColor: person.color }}
+      aria-label={`Dra ${person.name}`}
+      title={`Dra ${person.name} till ett ledigt pass`}
+    >
+      <span className="drag-handle" aria-hidden="true">⋮⋮</span>
       <div>
         <strong>{person.name}</strong>
         <span>{DAY_KEYS.filter((day) => person.days[day]).map((day) => DAY_LABELS[day]).join(' · ')}</span>
@@ -293,16 +304,44 @@ function DraggableAssignmentCard({
   );
 }
 
+function EmptyShiftDropZone({
+  dateKey,
+  start,
+  end,
+  startMin,
+}: {
+  dateKey: string;
+  start: string;
+  end: string;
+  startMin: number;
+}) {
+  const { ref, isDropTarget } = useDroppable({ id: `slot:${dateKey}:${start}:${end}` });
+  const top = (toMinutes(start) - startMin) * PIXELS_PER_MINUTE;
+  const height = Math.max(34, (toMinutes(end) - toMinutes(start)) * PIXELS_PER_MINUTE);
+
+  return (
+    <div
+      ref={ref}
+      className={`empty-shift-drop-zone ${isDropTarget ? 'slot-drop-active' : ''}`}
+      style={{ top, height }}
+    >
+      <span>Ledigt {start}–{end}</span>
+    </div>
+  );
+}
+
 function DayColumn({
   date,
   staff,
   assignments,
   onRemove,
+  shiftLengthMinutes,
 }: {
   date: Date;
   staff: Staff[];
   assignments: Assignment[];
   onRemove: (assignmentId: string) => void;
+  shiftLengthMinutes: number;
 }) {
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
@@ -337,6 +376,34 @@ function DayColumn({
   const lunchTop = (toMinutes(LUNCH_START) - startMin) * PIXELS_PER_MINUTE;
   const lunchHeight = (toMinutes(LUNCH_END) - toMinutes(LUNCH_START)) * PIXELS_PER_MINUTE;
 
+  const openSlots: Array<{ start: string; end: string }> = [];
+  let openSlotStart = startMin;
+
+  while (openSlotStart < endMin) {
+    if (openSlotStart >= toMinutes(LUNCH_START) && openSlotStart < toMinutes(LUNCH_END)) {
+      openSlotStart = toMinutes(LUNCH_END);
+      continue;
+    }
+
+    const start = minutesToTime(openSlotStart);
+    const end = contiguousShiftEnd(start, WORK_END, shiftLengthMinutes);
+    const endMinutes = Math.min(endMin, toMinutes(end));
+
+    if (endMinutes <= openSlotStart) break;
+
+    const slot = { start, end: minutesToTime(endMinutes) };
+    const occupied = assignments.some((assignment) =>
+      overlapsTime(slot.start, slot.end, { start: assignment.start, end: assignment.end })
+    );
+
+    if (!occupied) openSlots.push(slot);
+
+    openSlotStart = endMinutes;
+    if (openSlotStart === toMinutes(LUNCH_START)) {
+      openSlotStart = toMinutes(LUNCH_END);
+    }
+  }
+
   return (
     <section className="day-column">
       <header className="day-header">
@@ -362,7 +429,19 @@ function DayColumn({
           Lunch {LUNCH_START}–{LUNCH_END}
         </div>
 
-        {scheduledWithLanes.length === 0 && <div className="empty-day">Dra hit personal</div>}
+        <div className="empty-slot-layer">
+          {openSlots.map((slot) => (
+            <EmptyShiftDropZone
+              key={`${dateKey}-${slot.start}`}
+              dateKey={dateKey}
+              start={slot.start}
+              end={slot.end}
+              startMin={startMin}
+            />
+          ))}
+        </div>
+
+        {scheduledWithLanes.length === 0 && openSlots.length === 0 && <div className="empty-day">Dra hit personal</div>}
 
         <div className="assignment-layer">
           {scheduledWithLanes.map(({ person, assignment, lane }) => (
@@ -588,6 +667,60 @@ export default function App() {
     return `${highest.person.name} har ${percentText} schemalagda timmar än ${lowest.person.name}, främst eftersom ${reasons.join(' och ')}.`;
   }, [staff, scheduledHoursByPerson]);
 
+  function assignPersonToSlot(employeeId: string, dateKey: string, slotStart: string, slotEnd: string) {
+    const person = staff.find((item) => item.id === employeeId);
+    if (!person) return;
+
+    const date = new Date(`${dateKey}T12:00:00`);
+    const day = getDayKey(date);
+
+    if (!person.days[day]) {
+      setMessage(`${person.name} är markerad som ledig ${DAY_LABELS[day]}.`);
+      return;
+    }
+
+    if (assignments.some((assignment) => assignment.employeeId === employeeId && assignment.date === dateKey)) {
+      setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[day]}. Max ett pass per dag.`);
+      return;
+    }
+
+    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const blocked = person.blockedTimes?.[day] ?? [];
+
+    const occupied = assignments.some(
+      (assignment) =>
+        assignment.date === dateKey &&
+        overlapsTime(slotStart, slotEnd, { start: assignment.start, end: assignment.end })
+    );
+
+    if (occupied) {
+      assignPerson(employeeId, dateKey);
+      return;
+    }
+
+    if (
+      toMinutes(workTime.start) > toMinutes(slotStart) ||
+      toMinutes(workTime.end) < toMinutes(slotEnd) ||
+      blocked.some((period) => overlapsTime(slotStart, slotEnd, period))
+    ) {
+      setMessage(`${person.name} är inte tillgänglig ${slotStart}–${slotEnd} på ${DAY_LABELS[day]}.`);
+      return;
+    }
+
+    setAssignments((current) => [
+      ...current,
+      {
+        id: `manual-${Date.now()}-${employeeId}`,
+        employeeId,
+        date: dateKey,
+        start: slotStart,
+        end: slotEnd,
+      },
+    ]);
+
+    setMessage(`${person.name} lades i det lediga passet ${slotStart}–${slotEnd} på ${DAY_LABELS[day]}.`);
+  }
+
   function assignPerson(employeeId: string, dateKey: string) {
     const person = staff.find((item) => item.id === employeeId);
     if (!person) return;
@@ -687,6 +820,12 @@ export default function App() {
 
     const sourceId = String(event.operation.source?.id ?? '');
     const targetId = String(event.operation.target?.id ?? '');
+
+    if (sourceId.startsWith('staff:') && targetId.startsWith('slot:')) {
+      const [, dateKey, slotStart, slotEnd] = targetId.split(':');
+      assignPersonToSlot(sourceId.replace('staff:', ''), dateKey, slotStart, slotEnd);
+      return;
+    }
 
     if (sourceId.startsWith('assignment:') && targetId.startsWith('assignment:')) {
       const sourceAssignmentId = sourceId.replace('assignment:', '');
@@ -1179,6 +1318,7 @@ export default function App() {
                     staff={staff}
                     assignments={assignments.filter((assignment) => assignment.date === localDateKey(date))}
                     onRemove={removeAssignment}
+                    shiftLengthMinutes={shiftLengthMinutes}
                   />
                 ))}
               </div>
