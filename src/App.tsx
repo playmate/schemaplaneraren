@@ -1462,6 +1462,166 @@ export default function App() {
     setMessage(`${first.name} och ${second.name} bytte plats på ${DAY_LABELS[day]}.`);
   }
 
+  function clearDay(day: DayKey) {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const hadAssignments = assignments.some((assignment) => assignment.date === dateKey);
+
+    setAssignments((current) => current.filter((assignment) => assignment.date !== dateKey));
+    setMessage(
+      hadAssignments
+        ? `${DAY_LABELS[day]} rensades.`
+        : `${DAY_LABELS[day]} var redan tom.`
+    );
+  }
+
+  function regenerateDay(day: DayKey) {
+    const date = addDays(weekStart, DAY_KEYS.indexOf(day));
+    const dateKey = localDateKey(date);
+    const dayIndex = DAY_KEYS.indexOf(day);
+    const previousDateKey = localDateKey(addDays(date, -1));
+    const nextDateKey = localDateKey(addDays(date, 1));
+
+    const outsideDay = assignments.filter((assignment) => assignment.date !== dateKey);
+    const weeklyMinutes: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+
+    for (const assignment of outsideDay) {
+      if (!visibleDateKeys.includes(assignment.date)) continue;
+      weeklyMinutes[assignment.employeeId] =
+        (weeklyMinutes[assignment.employeeId] ?? 0) +
+        netWorkMinutes(assignment.start, assignment.end);
+    }
+
+    const recentWeeks = Array.from({ length: 5 }, (_, index) =>
+      startOfWeek(addDays(weekStart, -(index + 1) * 7))
+    );
+    const recentSlots = recentWeeks.flatMap((recentWeekStart, weekOffset) => {
+      const recentDateKey = localDateKey(addDays(recentWeekStart, dayIndex));
+      return assignments
+        .filter((assignment) => assignment.date === recentDateKey)
+        .map((assignment) => ({
+          employeeId: assignment.employeeId,
+          start: assignment.start,
+          end: assignment.end,
+          age: weekOffset + 1,
+        }));
+    });
+
+    const generated: Assignment[] = [];
+    const used = new Set<string>();
+    const gaps: string[] = [];
+    let slotStart = toMinutes(WORK_START);
+    const workdayEnd = toMinutes(WORK_END);
+    let slotIndex = 0;
+
+    while (slotStart < workdayEnd) {
+      if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+        slotStart = toMinutes(LUNCH_END);
+        continue;
+      }
+
+      const slotStartTime = minutesToTime(slotStart);
+      const slotEndTime = contiguousShiftEnd(slotStartTime, WORK_END, shiftLengthMinutes);
+      const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
+      const actualEndTime = minutesToTime(slotEnd);
+
+      if (slotEnd <= slotStart) break;
+
+      const isOpening = slotStart === toMinutes(WORK_START);
+      const isClosing = slotEnd === workdayEnd;
+
+      const candidates = staff
+        .filter((person) => {
+          if (used.has(person.id) || !person.days[day]) return false;
+
+          const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+          const blocked = person.blockedTimes?.[day] ?? [];
+
+          return (
+            toMinutes(availability.start) <= slotStart &&
+            toMinutes(availability.end) >= slotEnd &&
+            !blocked.some((period) => overlapsTime(slotStartTime, actualEndTime, period))
+          );
+        })
+        .map((person) => {
+          const previousAssignments = outsideDay.filter(
+            (assignment) => assignment.employeeId === person.id && assignment.date === previousDateKey
+          );
+          const nextAssignments = outsideDay.filter(
+            (assignment) => assignment.employeeId === person.id && assignment.date === nextDateKey
+          );
+
+          const boundaryPenalty =
+            (isOpening &&
+            (
+              previousAssignments.some((assignment) => assignment.start === WORK_START) ||
+              previousAssignments.some((assignment) => assignment.end === WORK_END) ||
+              nextAssignments.some((assignment) => assignment.start === WORK_START)
+            )
+              ? 100000
+              : 0) +
+            (isClosing &&
+            (
+              previousAssignments.some((assignment) => assignment.end === WORK_END) ||
+              nextAssignments.some((assignment) => assignment.end === WORK_END) ||
+              nextAssignments.some((assignment) => assignment.start === WORK_START)
+            )
+              ? 100000
+              : 0);
+
+          const recentSameSlotPenalty = recentSlots.reduce((sum, previousSlot) => {
+            if (
+              previousSlot.employeeId === person.id &&
+              previousSlot.start === slotStartTime &&
+              previousSlot.end === actualEndTime
+            ) {
+              return sum + Math.max(5000, 18000 - previousSlot.age * 2500);
+            }
+            return sum;
+          }, 0);
+
+          return {
+            person,
+            score:
+              (weeklyMinutes[person.id] ?? 0) +
+              boundaryPenalty +
+              recentSameSlotPenalty,
+          };
+        })
+        .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+
+      const chosen = candidates[0]?.person;
+
+      if (chosen) {
+        generated.push({
+          id: `auto-day-${dateKey}-${slotIndex}-${chosen.id}-${Date.now()}`,
+          employeeId: chosen.id,
+          date: dateKey,
+          start: slotStartTime,
+          end: actualEndTime,
+        });
+        used.add(chosen.id);
+        weeklyMinutes[chosen.id] =
+          (weeklyMinutes[chosen.id] ?? 0) + netWorkMinutes(slotStartTime, actualEndTime);
+      } else {
+        gaps.push(`${slotStartTime}–${actualEndTime}`);
+      }
+
+      slotStart = slotEnd;
+      if (slotStart === toMinutes(LUNCH_START)) {
+        slotStart = toMinutes(LUNCH_END);
+      }
+      slotIndex += 1;
+    }
+
+    setAssignments([...outsideDay, ...generated]);
+
+    setMessage(
+      gaps.length
+        ? `${DAY_LABELS[day]} gjordes om, men följande tider saknar personal: ${gaps.join(', ')}.`
+        : `${DAY_LABELS[day]} gjordes om med hänsyn till övriga schemaregler.`
+    );
+  }
+
   function parsePrompt() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
@@ -1496,22 +1656,33 @@ export default function App() {
       return;
     }
 
-    const swapMatch = text.match(/^byt\s+plats\s+på\s+(.+?)\s+med\s+(.+?)\s+på\s+(måndag|tisdag|onsdag|torsdag|fredag)(?:en)?\.?$/);
-    if (swapMatch) {
-      const firstName = swapMatch[1].trim();
-      const secondName = swapMatch[2].trim();
-      const firstPerson = staff.find(
-        (item) => item.name.toLocaleLowerCase('sv-SE') === firstName
-      );
-      const secondPerson = staff.find(
-        (item) => item.name.toLocaleLowerCase('sv-SE') === secondName
-      );
-      const swapDay = SWEDISH_DAY_TO_KEY[swapMatch[3]];
+    const dayCommandWord = Object.keys(SWEDISH_DAY_TO_KEY).find((word) => text.includes(word));
+    const dayCommandKey = dayCommandWord ? SWEDISH_DAY_TO_KEY[dayCommandWord] : undefined;
 
-      if (!firstPerson || !secondPerson || !swapDay) {
-        setMessage('Kunde inte hitta båda personerna eller dagen i byt-kommandot.');
+    if (dayCommandKey && /^(rensa|töm|tömma|nollställ)\b/.test(text) && !/schema|schemat/.test(text)) {
+      clearDay(dayCommandKey);
+      setPrompt('');
+      return;
+    }
+
+    if (
+      dayCommandKey &&
+      /^(gör\s+om|generera\s+om|skapa\s+om|lägg\s+om|schemalägg\s+om)\b/.test(text)
+    ) {
+      regenerateDay(dayCommandKey);
+      setPrompt('');
+      return;
+    }
+
+    if (/^byt\b/.test(text) && dayCommandKey) {
+      const mentionedPeople = staff.filter((item) =>
+        text.includes(item.name.toLocaleLowerCase('sv-SE'))
+      );
+
+      if (mentionedPeople.length === 2) {
+        swapPeopleOnDay(mentionedPeople[0], mentionedPeople[1], dayCommandKey);
       } else {
-        swapPeopleOnDay(firstPerson, secondPerson, swapDay);
+        setMessage('Skriv två personnamn och en dag, t.ex. “byt Erik med Sara på tisdag”.');
       }
       setPrompt('');
       return;
@@ -1669,13 +1840,15 @@ export default function App() {
 
             {showPromptHelp && (
               <div className="prompt-help-panel">
-                <div><strong>Skapa schema</strong><span>“skapa schema”</span></div>
+                <div><strong>Skapa hela veckan</strong><span>“skapa schema”</span></div>
+                <div><strong>Gör om en dag</strong><span>“gör om fredag” · “generera om tisdag”</span></div>
+                <div><strong>Rensa en dag</strong><span>“rensa fredag” · “töm onsdag”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag”</span></div>
-                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag”</span></div>
+                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag”</span></div>
                 <div><strong>Tidsbegränsning</strong><span>“Erik kan inte jobba kl 11 på måndagar”</span></div>
                 <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag”</span></div>
-                <div><strong>Byt två personer</strong><span>“byt plats på Erik med Anna på måndag”</span></div>
-                <div><strong>Nollställ</strong><span>“rensa schema”</span></div>
+                <div><strong>Byt två personer</strong><span>“byt Erik med Sara på tisdag” · “byt plats på Erik och Sara på tisdag”</span></div>
+                <div><strong>Nollställ veckan</strong><span>“rensa schema”</span></div>
               </div>
             )}
           </div>
