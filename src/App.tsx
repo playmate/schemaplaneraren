@@ -446,11 +446,15 @@ export default function App() {
     const weekKeys = visibleDates.map(localDateKey);
     const generated: Assignment[] = [];
     const assignedMinutes: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const closingCounts: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const lastWorkedSlot: Record<string, { date: string; end: string } | undefined> = {};
+    const lastClosingDate: Record<string, string | undefined> = {};
     const coverageGaps: string[] = [];
 
     for (const date of visibleDates) {
       const day = getDayKey(date);
       const dateKey = localDateKey(date);
+      const previousDateKey = localDateKey(addDays(date, -1));
       let slotStart = toMinutes(WORK_START);
       const workdayEnd = toMinutes(WORK_END);
       let slotIndex = 0;
@@ -459,8 +463,11 @@ export default function App() {
         const slotStartTime = minutesToTime(slotStart);
         const slotEndTime = endForNetDuration(slotStartTime, WORK_END, shiftLengthMinutes);
         const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
+        const actualEndTime = minutesToTime(slotEnd);
 
         if (slotEnd <= slotStart) break;
+
+        const isClosingShift = slotEnd === workdayEnd;
 
         const candidates = staff
           .filter((person) => {
@@ -468,12 +475,36 @@ export default function App() {
             const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
             return toMinutes(availability.start) <= slotStart && toMinutes(availability.end) >= slotEnd;
           })
-          .sort((a, b) =>
-            (assignedMinutes[a.id] ?? 0) - (assignedMinutes[b.id] ?? 0) ||
-            a.name.localeCompare(b.name, 'sv')
-          );
+          .map((person) => {
+            const previous = lastWorkedSlot[person.id];
 
-        const chosen = candidates[0];
+            // Starkt undvik flera pass direkt efter varandra samma dag.
+            const backToBackPenalty =
+              previous?.date === dateKey && previous.end === slotStartTime ? 100000 : 0;
+
+            // Undvik att samma person får sista passet flera dagar i rad.
+            const consecutiveClosePenalty =
+              isClosingShift && lastClosingDate[person.id] === previousDateKey ? 80000 : 0;
+
+            // Sprid generellt stängningspassen jämnt över veckan.
+            const closingLoadPenalty =
+              isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
+
+            // Baspoäng för jämn total arbetstid.
+            const fairnessScore = assignedMinutes[person.id] ?? 0;
+
+            return {
+              person,
+              score:
+                fairnessScore +
+                backToBackPenalty +
+                consecutiveClosePenalty +
+                closingLoadPenalty,
+            };
+          })
+          .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+
+        const chosen = candidates[0]?.person;
 
         if (chosen) {
           generated.push({
@@ -481,11 +512,24 @@ export default function App() {
             employeeId: chosen.id,
             date: dateKey,
             start: slotStartTime,
-            end: minutesToTime(slotEnd),
+            end: actualEndTime,
           });
-          assignedMinutes[chosen.id] = (assignedMinutes[chosen.id] ?? 0) + netWorkMinutes(slotStartTime, minutesToTime(slotEnd));
+
+          assignedMinutes[chosen.id] =
+            (assignedMinutes[chosen.id] ?? 0) +
+            netWorkMinutes(slotStartTime, actualEndTime);
+
+          lastWorkedSlot[chosen.id] = {
+            date: dateKey,
+            end: actualEndTime,
+          };
+
+          if (isClosingShift) {
+            closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
+            lastClosingDate[chosen.id] = dateKey;
+          }
         } else {
-          coverageGaps.push(`${DAY_LABELS[day]} ${slotStartTime}–${minutesToTime(slotEnd)}`);
+          coverageGaps.push(`${DAY_LABELS[day]} ${slotStartTime}–${actualEndTime}`);
         }
 
         slotStart = slotEnd;
@@ -501,7 +545,7 @@ export default function App() {
     if (coverageGaps.length) {
       setMessage(`Schemat skapades, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`);
     } else {
-      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)}.`);
+      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)} och hänsyn till jämn fördelning, flera pass i rad och avslutande pass.`);
     }
   }
 
