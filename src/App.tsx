@@ -505,6 +505,16 @@ export default function App() {
     setShiftLengthText(durationLabel(shiftLengthMinutes));
   }, [shiftLengthMinutes]);
 
+  useEffect(() => {
+    if (!message) return;
+
+    const timer = window.setTimeout(() => {
+      setMessage('');
+    }, 4000);
+
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
   const weekStart = useMemo(() => startOfWeek(cursorDate), [cursorDate]);
   const visibleDates = useMemo(
     () => DAY_KEYS.map((_, index) => addDays(weekStart, index)),
@@ -584,23 +594,31 @@ export default function App() {
 
       if (sourceAssignmentId === targetAssignmentId) return;
 
-      setAssignments((current) => {
-        const source = current.find((assignment) => assignment.id === sourceAssignmentId);
-        const target = current.find((assignment) => assignment.id === targetAssignmentId);
-        if (!source || !target) return current;
+      const sourceAssignment = assignments.find((assignment) => assignment.id === sourceAssignmentId);
+      const targetAssignment = assignments.find((assignment) => assignment.id === targetAssignmentId);
 
-        return current.map((assignment) => {
+      if (!sourceAssignment || !targetAssignment) return;
+
+      const sourcePerson = staff.find((person) => person.id === sourceAssignment.employeeId);
+      const targetPerson = staff.find((person) => person.id === targetAssignment.employeeId);
+
+      setAssignments((current) =>
+        current.map((assignment) => {
           if (assignment.id === sourceAssignmentId) {
-            return { ...assignment, employeeId: target.employeeId };
+            return { ...assignment, employeeId: targetAssignment.employeeId };
           }
           if (assignment.id === targetAssignmentId) {
-            return { ...assignment, employeeId: source.employeeId };
+            return { ...assignment, employeeId: sourceAssignment.employeeId };
           }
           return assignment;
-        });
-      });
+        })
+      );
 
-      setMessage('Personerna bytte pass.');
+      setMessage(
+        sourcePerson && targetPerson
+          ? `${sourcePerson.name} och ${targetPerson.name} bytte pass.`
+          : 'Två personer bytte pass.'
+      );
       return;
     }
 
