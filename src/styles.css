@@ -875,13 +875,14 @@ input:focus {
 .assignment-layer {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 20;
+  overflow: visible;
 }
 
 .empty-slot-layer {
   position: absolute;
   inset: 0;
-  z-index: 12;
+  z-index: 15;
   pointer-events: none;
   overflow: visible;
 }
@@ -1022,6 +1023,7 @@ input:focus {
 
 .assignment-card {
   position: absolute;
+  z-index: 1;
   border: 1px solid rgba(255,255,255,.12);
   border-top: 5px solid;
   border-radius: 10px;
@@ -1030,6 +1032,12 @@ input:focus {
   overflow: visible;
   backdrop-filter: blur(4px);
 }
+
+.assignment-card:hover,
+.assignment-card:has(.assignment-warning:hover) {
+  z-index: 1000;
+}
+
 
 .assignment-drag-area {
   height: 100%;
