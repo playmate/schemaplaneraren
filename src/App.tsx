@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.6';
+const APP_VERSION = '0.1.7';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1468,33 +1468,18 @@ export default function App() {
     setMessage(`Schema för vecka ${getIsoWeek(cursorDate)} nollställdes.`);
   }
 
-  function resetEverything() {
+  function resetAllSchedules() {
     const confirmed = window.confirm(
-      'Nollställ allt?\n\nDetta tar bort alla schemalagda pass i alla veckor, återställer personalen till standard och återställer passlängden till 02:00. Detta går inte att ångra.'
+      'Nollställ alla scheman?\n\nDetta tar bort alla schemalagda pass i alla veckor och månader. Personal, arbetstider, tidsbegränsningar och övriga inställningar behålls.'
     );
 
     if (!confirmed) {
-      setMessage('Nollställ allt avbröts.');
+      setMessage('Nollställ alla scheman avbröts.');
       return;
     }
 
     setAssignments([]);
-    setStaff(defaultStaff.map((person) => ({
-      ...person,
-      days: { ...person.days },
-      workTimes: {
-        mon: { ...person.workTimes.mon },
-        tue: { ...person.workTimes.tue },
-        wed: { ...person.workTimes.wed },
-        thu: { ...person.workTimes.thu },
-        fri: { ...person.workTimes.fri },
-      },
-      blockedTimes: defaultBlockedTimes(),
-    })));
-    setShiftLengthMinutes(120);
-    setShiftLengthText('02:00');
-    setSelectedStaffId(null);
-    setMessage('Allt nollställdes och standardinställningarna återställdes.');
+    setMessage('Alla scheman nollställdes. Personal och inställningar behölls.');
   }
 
   function applyShiftLengthText() {
@@ -2038,8 +2023,8 @@ export default function App() {
       return;
     }
 
-    if (/^(nollställ|rensa|återställ)\s+allt$/.test(text)) {
-      resetEverything();
+    if (/^(nollställ|rensa|töm)\s+alla\s+scheman$/.test(text)) {
+      resetAllSchedules();
       setPrompt('');
       return;
     }
@@ -2438,7 +2423,7 @@ export default function App() {
               <div className="prompt-help-panel">
                 <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “generera schema” · “fyll schema”</span></div>
                 <div><strong>Skapa/gör om en dag</strong><span>“fyll torsdag” · “skapa torsdag” · “schemalägg torsdag” · “gör om fredag” · “generera om tisdag”</span></div>
-                <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” · “nollställ allt”</span></div>
+                <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” · “nollställ alla scheman”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
                 <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
                 <div><strong>Ta bort utan ersättare</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag” · “radera Sara från måndag”</span></div>
@@ -2586,7 +2571,7 @@ export default function App() {
 
               <div className="schedule-footer-actions">
                 <button className="reset-button" onClick={resetVisibleSchedule}>Nollställ schema</button>
-                <button className="reset-all-button" onClick={resetEverything}>Nollställ allt</button>
+                <button className="reset-all-button" onClick={resetAllSchedules}>Nollställ alla scheman</button>
               </div>
             </section>
           </main>
