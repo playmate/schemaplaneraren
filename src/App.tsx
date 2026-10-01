@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 
 type ViewMode = 'day' | 'week' | 'month';
+type ScheduleMode = 'staff' | 'project';
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 type SidebarTab = 'person' | 'business' | 'projects';
 type ConstraintLevel = 'hard' | 'soft';
@@ -68,6 +69,15 @@ type Assignment = {
   lunchStart?: string;
   lunchEnd?: string;
   lunchMinutes?: number;
+};
+
+type TaskAssignment = {
+  id: string;
+  projectId: string;
+  employeeId: string | null;
+  date: string;
+  start: string;
+  end: string;
 };
 
 type ValidationItem = {
@@ -223,6 +233,15 @@ function assignmentLunch(a: Assignment, business: BusinessSettings) {
   return { start, end };
 }
 
+function overlaps(startA: string, endA: string, startB: string, endB: string) {
+  return toMinutes(startA) < toMinutes(endB) && toMinutes(endA) > toMinutes(startB);
+}
+
+function formatTaskMinutes(minutes: number) {
+  if (minutes % 60 === 0) return `${minutes / 60} h`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
 function DraggableEmployee({ employee }: { employee: Employee }) {
   const { ref, handleRef } = useDraggable({ id: `employee:${employee.id}` });
   return (
@@ -303,6 +322,47 @@ function ScheduleCell({
   );
 }
 
+function ProjectScheduleCell({
+  date,
+  project,
+  taskAssignments,
+  employees,
+}: {
+  date: Date;
+  project: Project;
+  taskAssignments: TaskAssignment[];
+  employees: Employee[];
+}) {
+  const dateKey = localDateKey(date);
+  const byId = Object.fromEntries(employees.map((employee) => [employee.id, employee]));
+  const slots = taskAssignments.filter((task) => task.date === dateKey && task.projectId === project.id);
+
+  return (
+    <div className="project-day-cell">
+      <div className="cell-date">
+        <div>
+          <span>{capitalize(new Intl.DateTimeFormat('sv-SE', { weekday: 'short' }).format(date))}</span>
+          <small>{project.start}–{project.end}</small>
+        </div>
+        <strong>{date.getDate()}</strong>
+      </div>
+      <div className="project-slot-list">
+        {slots.length === 0 && <span className="empty-text">Inga projektpass skapade</span>}
+        {slots.map((slot) => {
+          const employee = slot.employeeId ? byId[slot.employeeId] : undefined;
+          return (
+            <div key={slot.id} className={`project-slot ${employee ? '' : 'unassigned'}`} style={{ borderLeftColor: employee?.color ?? '#dc2626' }}>
+              <div className="project-slot-time">{slot.start}–{slot.end}</div>
+              <strong>{employee?.name ?? 'Obemannat'}</strong>
+              <span>{formatTaskMinutes(toMinutes(slot.end) - toMinutes(slot.start))}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [employees, setEmployees] = useState<Employee[]>(() => {
     const saved = localStorage.getItem('scheduler-employees-v2');
@@ -320,8 +380,13 @@ function App() {
     const saved = localStorage.getItem('scheduler-projects-v2');
     return saved ? JSON.parse(saved) : initialProjects;
   });
+  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>(() => {
+    const saved = localStorage.getItem('scheduler-task-assignments-v1');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const [view, setView] = useState<ViewMode>('week');
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('staff');
   const [cursorDate, setCursorDate] = useState(new Date());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(employees[0]?.id ?? '');
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id ?? '');
@@ -334,6 +399,7 @@ function App() {
   useEffect(() => localStorage.setItem('scheduler-assignments-v2', JSON.stringify(assignments)), [assignments]);
   useEffect(() => localStorage.setItem('scheduler-business-v2', JSON.stringify(business)), [business]);
   useEffect(() => localStorage.setItem('scheduler-projects-v2', JSON.stringify(projects)), [projects]);
+  useEffect(() => localStorage.setItem('scheduler-task-assignments-v1', JSON.stringify(taskAssignments)), [taskAssignments]);
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId) ?? employees[0];
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0];
@@ -342,18 +408,23 @@ function App() {
     if (view === 'day') return [new Date(cursorDate)];
     if (view === 'week') {
       const start = startOfWeek(cursorDate);
-      return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+      return Array.from({ length: 5 }, (_, i) => addDays(start, i));
     }
     const year = cursorDate.getFullYear();
     const month = cursorDate.getMonth();
-    const first = new Date(year, month, 1);
-    const gridStart = startOfWeek(first);
-    return Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+    const days: Date[] = [];
+    const current = new Date(year, month, 1);
+    while (current.getMonth() === month) {
+      const day = current.getDay();
+      if (day !== 0 && day !== 6) days.push(new Date(current));
+      current.setDate(current.getDate() + 1);
+    }
+    return days;
   }, [view, cursorDate]);
 
   const weekDates = useMemo(() => {
     const start = startOfWeek(cursorDate);
-    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    return Array.from({ length: 5 }, (_, i) => addDays(start, i));
   }, [cursorDate]);
 
   const weekDateKeys = useMemo(() => weekDates.map(localDateKey), [weekDates]);
@@ -392,7 +463,7 @@ function App() {
   function addProject() {
     const id = `project-${Date.now()}`;
     const project: Project = {
-      id, name: `Projekt ${projects.length + 1}`, minShiftHours: 4, normalShiftHours: 8, maxShiftHours: 9,
+      id, name: `Projekt ${projects.length + 1}`, minShiftHours: 1, normalShiftHours: 3, maxShiftHours: 3,
       minStaff: 1, desiredStaff: 1, start: '08:00', end: '17:00', color: COLORS[projects.length % COLORS.length],
     };
     setProjects((current) => [...current, project]);
@@ -459,6 +530,113 @@ function App() {
     addAssignment(sourceId.replace('employee:', ''), targetId.replace('date:', ''));
   }
 
+  function generateProjectSchedule() {
+    if (!selectedProject) return;
+    const dateKeys = visibleDates.map(localDateKey);
+    const keepOtherProjects = taskAssignments.filter((task) => task.projectId !== selectedProject.id || !dateKeys.includes(task.date));
+    const generated: TaskAssignment[] = [];
+    const assignedMinutes: Record<string, number> = Object.fromEntries(employees.map((employee) => [employee.id, 0]));
+    const closingCount: Record<string, number> = Object.fromEntries(employees.map((employee) => [employee.id, 0]));
+
+    for (const date of visibleDates) {
+      const dateKey = localDateKey(date);
+      const day = getDayKey(date);
+      if (!business.days[day].open) continue;
+
+      const startMinute = Math.max(toMinutes(selectedProject.start), toMinutes(business.days[day].start));
+      const endMinute = Math.min(toMinutes(selectedProject.end), toMinutes(business.days[day].end));
+      if (endMinute <= startMinute) continue;
+
+      const maxSlotMinutes = Math.max(30, Math.round(selectedProject.maxShiftHours * 60));
+      let slotStart = startMinute;
+      let slotIndex = 0;
+
+      while (slotStart < endMinute) {
+        let slotEnd = Math.min(endMinute, slotStart + maxSlotMinutes);
+
+        if (business.lunch.enabled && slotStart < toMinutes(business.lunch.windowEnd) && slotEnd > toMinutes(business.lunch.windowStart)) {
+          if (slotStart < toMinutes(business.lunch.windowStart)) {
+            slotEnd = Math.min(slotEnd, toMinutes(business.lunch.windowStart));
+          } else {
+            slotStart = Math.max(slotStart, toMinutes(business.lunch.windowEnd));
+            if (slotStart >= endMinute) break;
+            slotEnd = Math.min(endMinute, slotStart + maxSlotMinutes);
+          }
+        }
+
+        if (slotEnd <= slotStart) {
+          slotStart += 30;
+          continue;
+        }
+
+        const start = `${String(Math.floor(slotStart / 60)).padStart(2, '0')}:${String(slotStart % 60).padStart(2, '0')}`;
+        const end = `${String(Math.floor(slotEnd / 60)).padStart(2, '0')}:${String(slotEnd % 60).padStart(2, '0')}`;
+
+        const candidates = employees.filter((employee) => {
+          if (!employee.days[day] || !employee.projectIds.includes(selectedProject.id)) return false;
+
+          const staffShift = assignments.find((assignment) => assignment.employeeId === employee.id && assignment.date === dateKey);
+          const availableStart = staffShift?.start ?? employee.overrides[day]?.start ?? employee.defaultStart;
+          const availableEnd = staffShift?.end ?? employee.overrides[day]?.end ?? employee.defaultEnd;
+          if (toMinutes(start) < toMinutes(availableStart) || toMinutes(end) > toMinutes(availableEnd)) return false;
+
+          const lunch = staffShift ? assignmentLunch(staffShift, business) : (business.lunch.enabled ? { start: business.lunch.windowStart, end: business.lunch.windowEnd } : null);
+          if (lunch && overlaps(start, end, lunch.start, lunch.end)) return false;
+
+          return ![...taskAssignments, ...generated].some((task) =>
+            task.employeeId === employee.id &&
+            task.date === dateKey &&
+            task.projectId !== selectedProject.id &&
+            overlaps(start, end, task.start, task.end)
+          ) && !generated.some((task) =>
+            task.employeeId === employee.id &&
+            task.date === dateKey &&
+            overlaps(start, end, task.start, task.end)
+          );
+        });
+
+        const isClosingSlot = slotEnd === endMinute;
+        const scored = candidates.map((employee) => {
+          const previous = generated
+            .filter((task) => task.employeeId === employee.id && task.date === dateKey)
+            .sort((a, b) => a.end.localeCompare(b.end))
+            .at(-1);
+          const backToBackPenalty = previous?.end === start ? 100000 : 0;
+          const closingPenalty = isClosingSlot ? (closingCount[employee.id] ?? 0) * 50000 : 0;
+          return {
+            employee,
+            score: (assignedMinutes[employee.id] ?? 0) + backToBackPenalty + closingPenalty,
+          };
+        }).sort((a, b) => a.score - b.score || a.employee.name.localeCompare(b.employee.name, 'sv'));
+
+        const chosen = scored[0]?.employee ?? null;
+        generated.push({
+          id: `${selectedProject.id}-${dateKey}-${slotIndex}`,
+          projectId: selectedProject.id,
+          employeeId: chosen?.id ?? null,
+          date: dateKey,
+          start,
+          end,
+        });
+
+        if (chosen) {
+          assignedMinutes[chosen.id] = (assignedMinutes[chosen.id] ?? 0) + (slotEnd - slotStart);
+          if (isClosingSlot) closingCount[chosen.id] = (closingCount[chosen.id] ?? 0) + 1;
+        }
+
+        slotStart = slotEnd;
+        if (business.lunch.enabled && slotStart === toMinutes(business.lunch.windowStart)) {
+          slotStart = toMinutes(business.lunch.windowEnd);
+        }
+        slotIndex += 1;
+      }
+    }
+
+    setTaskAssignments([...keepOtherProjects, ...generated]);
+    setScheduleMode('project');
+    setMessage(`Projektpassen för ${selectedProject.name} fördelades så jämnt som möjligt utan överlappning. Obemannade luckor visas tydligt.`);
+  }
+
   function navigate(direction: -1 | 1) {
     const next = new Date(cursorDate);
     if (view === 'day') next.setDate(next.getDate() + direction);
@@ -472,6 +650,7 @@ function App() {
     if (!text) return;
 
     const employee = employees.find((e) => text.includes(e.name.toLocaleLowerCase('sv-SE')));
+    const mentionedProject = projects.find((project) => text.includes(project.name.toLocaleLowerCase('sv-SE')));
     let changed = false;
 
     if (employee) {
@@ -548,7 +727,12 @@ function App() {
     }
 
     const globalMaxPass = text.match(/(?:max(?:imal)?(?:\s*längd)?(?:\s+på)?\s+pass|maxpass)\s+(?:är\s+)?(\d+(?:[.,]\d+)?)\s*(?:h|tim(?:me|mar)?)/);
-    if (globalMaxPass && !employee) {
+    if (globalMaxPass && mentionedProject) {
+      updateProject(mentionedProject.id, { maxShiftHours: Number(globalMaxPass[1].replace(',', '.')) });
+      setSelectedProjectId(mentionedProject.id);
+      setSidebarTab('projects');
+      changed = true;
+    } else if (globalMaxPass && !employee) {
       setBusiness((current) => ({ ...current, maxShiftHours: Number(globalMaxPass[1].replace(',', '.')) }));
       changed = true;
       setSidebarTab('business');
@@ -656,22 +840,28 @@ function App() {
       <div className="app-shell">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Schemaplaneraren v0.3</p>
+            <p className="eyebrow">Schemaplaneraren v0.4</p>
             <h1>Planera smartare – med regler</h1>
           </div>
-          <div className="view-switcher" role="group" aria-label="Välj vy">
-            {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-              <button key={mode} className={view === mode ? 'active' : ''} onClick={() => setView(mode)}>
-                {mode === 'day' ? 'Dag' : mode === 'week' ? 'Vecka' : 'Månad'}
-              </button>
-            ))}
+          <div className="topbar-controls">
+            <div className="schedule-mode-switcher" role="group" aria-label="Välj schematyp">
+              <button className={scheduleMode === 'staff' ? 'active' : ''} onClick={() => setScheduleMode('staff')}>Personal</button>
+              <button className={scheduleMode === 'project' ? 'active' : ''} onClick={() => setScheduleMode('project')}>Projekt / uppgifter</button>
+            </div>
+            <div className="view-switcher" role="group" aria-label="Välj vy">
+              {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
+                <button key={mode} className={view === mode ? 'active' : ''} onClick={() => setView(mode)}>
+                  {mode === 'day' ? 'Dag' : mode === 'week' ? 'Vecka' : 'Månad'}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
         <section className="prompt-panel">
           <div>
             <strong>Skriv en regel</strong>
-            <span>Exempel: “Anna max pass 7,5 timmar”, “maxlängd pass 8 timmar”, “lunch 12-12:30” eller “öppet onsdag 07-19”</span>
+            <span>Exempel: “Anna max pass 7,5 timmar”, “Reception maxpass 3 timmar”, “lunch 12-12:30” eller “öppet onsdag 07-19”</span>
           </div>
           <div className="prompt-row">
             <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && parsePrompt()} placeholder="Skriv en instruktion…" />
@@ -796,18 +986,42 @@ function App() {
             <section className="calendar-panel">
               <div className="calendar-toolbar">
                 <div className="nav-buttons"><button onClick={() => navigate(-1)}>←</button><button onClick={() => setCursorDate(new Date())}>Idag</button><button onClick={() => navigate(1)}>→</button></div>
-                <h2>{periodTitle}</h2>
-                <button className="secondary" onClick={autoFillVisible}>Fyll automatiskt</button>
+                <h2>{scheduleMode === 'staff' ? periodTitle : `${selectedProject?.name ?? 'Projekt'} · ${periodTitle}`}</h2>
+                {scheduleMode === 'staff'
+                  ? <button className="secondary" onClick={autoFillVisible}>Fyll personalschema</button>
+                  : <button className="secondary" onClick={generateProjectSchedule} disabled={!selectedProject}>Fördela projektpass</button>}
               </div>
 
-              <div className={`calendar-grid ${view}`}>
-                {visibleDates.map((date) => {
-                  const key = localDateKey(date);
-                  const dayAssignments = assignments.filter((a) => a.date === key);
-                  const faded = view === 'month' && date.getMonth() !== cursorDate.getMonth();
-                  return <div key={key} className={faded ? 'faded' : ''}><ScheduleCell date={date} assignments={dayAssignments} employees={employees} projects={projects} business={business} onRemove={removeAssignment} onEdit={setEditingAssignment} /></div>;
-                })}
-              </div>
+              {scheduleMode === 'staff' ? (
+                <div className={`calendar-grid ${view}`}>
+                  {visibleDates.map((date) => {
+                    const key = localDateKey(date);
+                    const dayAssignments = assignments.filter((a) => a.date === key);
+                    const faded = view === 'month' && date.getMonth() !== cursorDate.getMonth();
+                    return <div key={key} className={faded ? 'faded' : ''}><ScheduleCell date={date} assignments={dayAssignments} employees={employees} projects={projects} business={business} onRemove={removeAssignment} onEdit={setEditingAssignment} /></div>;
+                  })}
+                </div>
+              ) : selectedProject ? (
+                <>
+                  <div className="project-schedule-summary">
+                    <span>Maxpass <strong>{selectedProject.maxShiftHours} h</strong></span>
+                    <span>Ingen dubbelbokning</span>
+                    <span>Jämn fördelning prioriteras</span>
+                    <span>Helger dolda</span>
+                  </div>
+                  <div className={`project-calendar-grid ${view}`}>
+                    {visibleDates.map((date) => (
+                      <ProjectScheduleCell
+                        key={localDateKey(date)}
+                        date={date}
+                        project={selectedProject}
+                        taskAssignments={taskAssignments}
+                        employees={employees}
+                      />
+                    ))}
+                  </div>
+                </>
+              ) : <div className="empty-text">Skapa eller välj ett projekt först.</div>}
             </section>
 
             <section className="validation-panel">
@@ -840,7 +1054,7 @@ function App() {
           </div>
         )}
 
-        <footer>Sparas automatiskt lokalt i webbläsaren. v0.3 visar lunch i schemat och stödjer maxlängd på pass via inställning och prompt.</footer>
+        <footer>Sparas automatiskt lokalt i webbläsaren. v0.4 har vardagsschema, separat projekt-/uppgiftsvy, jämn passfördelning och skydd mot överlappning.</footer>
       </div>
     </DragDropProvider>
   );
