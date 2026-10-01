@@ -991,6 +991,7 @@ export default function App() {
 
       const sourceWouldDuplicate = assignments.some(
         (assignment) =>
+          assignment.id !== sourceAssignmentId &&
           assignment.id !== targetAssignmentId &&
           assignment.employeeId === sourceAssignment.employeeId &&
           assignment.date === targetAssignment.date
@@ -998,6 +999,7 @@ export default function App() {
       const targetWouldDuplicate = assignments.some(
         (assignment) =>
           assignment.id !== sourceAssignmentId &&
+          assignment.id !== targetAssignmentId &&
           assignment.employeeId === targetAssignment.employeeId &&
           assignment.date === sourceAssignment.date
       );
