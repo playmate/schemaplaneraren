@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.19';
+const APP_VERSION = '0.1.20';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -694,7 +694,6 @@ function EmptyShiftDropZone({
           <span className="empty-slot-warning-icon" aria-hidden="true">!</span>
           <span className="empty-slot-warning-tooltip" role="tooltip">
             <strong>Tomt pass</strong>
-            <span>Det finns bara ett fåtal tomma pass kvar den här veckan.</span>
             <span className="empty-slot-warning-tip">{suggestion}</span>
           </span>
         </span>
