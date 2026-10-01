@@ -63,6 +63,9 @@ const SWEDISH_DAY_TO_KEY: Record<string, DayKey> = {
   tordag: 'thu',
   tordagar: 'thu',
   tordagen: 'thu',
+  tordag: 'thu',
+  tordagar: 'thu',
+  tordagen: 'thu',
   fredag: 'fri',
   fredagar: 'fri',
   fredagen: 'fri',
@@ -154,6 +157,89 @@ function softColor(hex: string, alpha = 0.24) {
   const g = parseInt(full.slice(2, 4), 16);
   const b = parseInt(full.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function getAssignmentWarnings(
+  assignment: Assignment,
+  person: Staff,
+  allAssignments: Assignment[],
+  weekDateKeys: string[],
+  allStaff: Staff[]
+) {
+  const warnings: string[] = [];
+  const date = new Date(`${assignment.date}T12:00:00`);
+  const day = getDayKey(date);
+  const previousDateKey = localDateKey(addDays(date, -1));
+  const nextDateKey = localDateKey(addDays(date, 1));
+  const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+  const blocked = person.blockedTimes?.[day] ?? [];
+
+  if (
+    toMinutes(assignment.start) < toMinutes(workTime.start) ||
+    toMinutes(assignment.end) > toMinutes(workTime.end)
+  ) {
+    warnings.push(`Passet ligger utanför ${person.name}s arbetstid ${workTime.start}–${workTime.end}.`);
+  }
+
+  if (blocked.some((period) => overlapsTime(assignment.start, assignment.end, period))) {
+    warnings.push('Passet krockar med en registrerad tidsbegränsning.');
+  }
+
+  const previous = allAssignments.filter(
+    (item) => item.employeeId === person.id && item.date === previousDateKey
+  );
+  const next = allAssignments.filter(
+    (item) => item.employeeId === person.id && item.date === nextDateKey
+  );
+
+  if (
+    assignment.start === WORK_START &&
+    previous.some((item) => item.end === WORK_END)
+  ) {
+    warnings.push('Morgonpass direkt efter ett avslutande pass föregående arbetsdag.');
+  }
+
+  if (
+    assignment.end === WORK_END &&
+    next.some((item) => item.start === WORK_START)
+  ) {
+    warnings.push('Avslutande pass följs av morgonpass nästa arbetsdag.');
+  }
+
+  if (
+    assignment.start === WORK_START &&
+    previous.some((item) => item.start === WORK_START)
+  ) {
+    warnings.push('Första passet två arbetsdagar i rad.');
+  }
+
+  if (
+    assignment.end === WORK_END &&
+    previous.some((item) => item.end === WORK_END)
+  ) {
+    warnings.push('Avslutande pass två arbetsdagar i rad.');
+  }
+
+  const weeklyTotals = Object.fromEntries(allStaff.map((item) => [item.id, 0])) as Record<string, number>;
+  for (const item of allAssignments) {
+    if (!weekDateKeys.includes(item.date)) continue;
+    weeklyTotals[item.employeeId] =
+      (weeklyTotals[item.employeeId] ?? 0) + netWorkMinutes(item.start, item.end) / 60;
+  }
+
+  const averageHours =
+    allStaff.length > 0
+      ? Object.values(weeklyTotals).reduce((sum, hours) => sum + hours, 0) / allStaff.length
+      : 0;
+  const personHours = weeklyTotals[person.id] ?? 0;
+
+  if (averageHours > 0 && personHours >= averageHours * 1.25 && personHours - averageHours >= 1) {
+    warnings.push(
+      `Många timmar denna vecka: ${personHours.toFixed(1)} h jämfört med snittet ${averageHours.toFixed(1)} h.`
+    );
+  }
+
+  return [...new Set(warnings)];
 }
 
 const defaultStaff: Staff[] = [
@@ -285,6 +371,7 @@ function DraggableAssignmentCard({
   startMin,
   totalHeight,
   onRemove,
+  warnings,
 }: {
   person: Staff;
   assignment: Assignment;
@@ -293,6 +380,7 @@ function DraggableAssignmentCard({
   startMin: number;
   totalHeight: number;
   onRemove: (assignmentId: string) => void;
+  warnings: string[];
 }) {
   const { ref: dragRef, handleRef } = useDraggable({ id: `assignment:${assignment.id}` });
   const { ref: dropRef, isDropTarget } = useDroppable({ id: `assignment:${assignment.id}` });
@@ -331,6 +419,15 @@ function DraggableAssignmentCard({
       >
         ×
       </button>
+      {warnings.length > 0 && (
+        <span
+          className="assignment-warning"
+          title={warnings.join('\n')}
+          aria-label={`Varning: ${warnings.join(' ')}`}
+        >
+          ⚠
+        </span>
+      )}
       <div ref={handleRef} className="assignment-drag-area" title="Dra till ett annat pass för att byta plats">
         <strong className="assignment-name">{person.name}</strong>
         <span>{assignment.start}–{assignment.end}</span>
@@ -373,12 +470,16 @@ function DayColumn({
   assignments,
   onRemove,
   shiftLengthMinutes,
+  allAssignments,
+  weekDateKeys,
 }: {
   date: Date;
   staff: Staff[];
   assignments: Assignment[];
   onRemove: (assignmentId: string) => void;
   shiftLengthMinutes: number;
+  allAssignments: Assignment[];
+  weekDateKeys: string[];
 }) {
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
@@ -491,6 +592,7 @@ function DayColumn({
               startMin={startMin}
               totalHeight={totalHeight}
               onRemove={onRemove}
+              warnings={getAssignmentWarnings(assignment, person, allAssignments, weekDateKeys, staff)}
             />
           ))}
         </div>
@@ -855,6 +957,19 @@ export default function App() {
     });
 
     if (!availableSlot) {
+      const replacementTarget = [...dayAssignments]
+        .sort((a, b) => toMinutes(a.start) - toMinutes(b.start))
+        .find((assignment) =>
+          toMinutes(workTime.start) <= toMinutes(assignment.start) &&
+          toMinutes(workTime.end) >= toMinutes(assignment.end) &&
+          !blocked.some((period) => overlapsTime(assignment.start, assignment.end, period))
+        );
+
+      if (replacementTarget) {
+        replaceAssignmentWithPerson(employeeId, replacementTarget.id);
+        return;
+      }
+
       const hasAnyGap = candidateSlots.some((slot) =>
         !dayAssignments.some((assignment) =>
           overlapsTime(slot.start, slot.end, { start: assignment.start, end: assignment.end })
@@ -864,7 +979,7 @@ export default function App() {
       setMessage(
         hasAnyGap
           ? `Det finns ett ledigt pass på ${DAY_LABELS[day]}, men ${person.name} är inte tillgänglig då.`
-          : `Det finns inget oschemalagt pass kvar på ${DAY_LABELS[day]}.`
+          : `${person.name} kan inte ta något av passen på ${DAY_LABELS[day]} enligt sin tillgänglighet.`
       );
       return;
     }
@@ -976,11 +1091,6 @@ export default function App() {
       blocked.some((period) => overlapsTime(target.start, target.end, period))
     ) {
       setMessage(`${person.name} är inte tillgänglig ${target.start}–${target.end} på ${DAY_LABELS[day]}.`);
-      return;
-    }
-
-    if (hasBoundaryConflict(employeeId, target.date, target.start, target.end, [target.id])) {
-      setMessage(`Ersättningen stoppades för ${person.name}: undvik flera första/sista pass i rad.`);
       return;
     }
 
@@ -1943,6 +2053,34 @@ export default function App() {
       text.includes(item.name.toLocaleLowerCase('sv-SE'))
     );
 
+    if (
+      dayCommandKey &&
+      mentionedPeople.length === 1 &&
+      /^(ta\s+bort|plocka\s+bort|radera)\b/.test(text)
+    ) {
+      const personToRemove = mentionedPeople[0];
+      const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(dayCommandKey)));
+      const assignmentToRemove = assignments.find(
+        (assignment) =>
+          assignment.employeeId === personToRemove.id &&
+          assignment.date === dateKey
+      );
+
+      if (!assignmentToRemove) {
+        setMessage(`${personToRemove.name} har inget pass på ${DAY_LABELS[dayCommandKey]}.`);
+      } else {
+        setAssignments((current) =>
+          current.filter((assignment) => assignment.id !== assignmentToRemove.id)
+        );
+        setMessage(
+          `${personToRemove.name} togs bort från ${DAY_LABELS[dayCommandKey]}. Passet lämnades tomt.`
+        );
+      }
+
+      setPrompt('');
+      return;
+    }
+
     if (dayCommandKey && /^(vem\s+jobbar|visa\s+(?:schema|schemat)|hur\s+ser\s+.+\s+ut)/.test(text)) {
       describeDay(dayCommandKey);
       setPrompt('');
@@ -2262,6 +2400,7 @@ export default function App() {
                 <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “rensa schema”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
                 <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
+                <div><strong>Ta bort utan ersättare</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag” · “radera Sara från måndag”</span></div>
                 <div><strong>Ta bort utan återfyllnad</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag”</span></div>
                 <div><strong>Börjar senare</strong><span>“Anna börjar 12 på onsdag” · “Erik startar kl 10 torsdag”</span></div>
                 <div><strong>Slutar tidigare</strong><span>“Sara slutar 14 på fredag” · “Erik kan jobba till 15 tisdag”</span></div>
@@ -2398,6 +2537,8 @@ export default function App() {
                     assignments={assignments.filter((assignment) => assignment.date === localDateKey(date))}
                     onRemove={removeAssignment}
                     shiftLengthMinutes={shiftLengthMinutes}
+                    allAssignments={assignments}
+                    weekDateKeys={visibleDateKeys}
                   />
                 ))}
               </div>
