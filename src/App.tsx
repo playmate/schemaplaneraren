@@ -4,11 +4,17 @@ import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri';
 type AppTab = 'schedule' | 'staff';
 
+type WorkTime = {
+  start: string;
+  end: string;
+};
+
 type Staff = {
   id: string;
   name: string;
   color: string;
   days: Record<DayKey, boolean>;
+  workTimes: Record<DayKey, WorkTime>;
 };
 
 type Assignment = {
@@ -49,7 +55,21 @@ const SWEDISH_DAY_TO_KEY: Record<string, DayKey> = {
   fredagen: 'fri',
 };
 
-const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#059669', '#d97706', '#0891b2', '#dc2626', '#4f46e5'];
+const COLORS = ['#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#22d3ee', '#f87171', '#818cf8'];
+
+function defaultWorkTimes(): Record<DayKey, WorkTime> {
+  return {
+    mon: { start: WORK_START, end: WORK_END },
+    tue: { start: WORK_START, end: WORK_END },
+    wed: { start: WORK_START, end: WORK_END },
+    thu: { start: WORK_START, end: WORK_END },
+    fri: { start: WORK_START, end: WORK_END },
+  };
+}
+
+function formatHours(start: string, end: string) {
+  return Math.max(0, (toMinutes(end) - toMinutes(start)) / 60);
+}
 
 const defaultStaff: Staff[] = [
   {
@@ -57,18 +77,21 @@ const defaultStaff: Staff[] = [
     name: 'Anna',
     color: COLORS[0],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
+    workTimes: defaultWorkTimes(),
   },
   {
     id: 'erik',
     name: 'Erik',
     color: COLORS[1],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
+    workTimes: defaultWorkTimes(),
   },
   {
     id: 'sara',
     name: 'Sara',
     color: COLORS[2],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true },
+    workTimes: defaultWorkTimes(),
   },
 ];
 
@@ -126,6 +149,7 @@ function DraggableStaff({ person }: { person: Staff }) {
       <div>
         <strong>{person.name}</strong>
         <span>{DAY_KEYS.filter((day) => person.days[day]).map((day) => DAY_LABELS[day]).join(' · ')}</span>
+        <small>Standard {person.workTimes.mon.start}–{person.workTimes.mon.end}</small>
       </div>
     </div>
   );
@@ -185,11 +209,19 @@ function DayColumn({
         <div className="assignment-layer">
           {people.map((person, index) => {
             const width = 100 / Math.max(1, people.length);
+            const workTime = person.workTimes[dayKey] ?? { start: WORK_START, end: WORK_END };
+            const top = Math.max(0, (toMinutes(workTime.start) - startMin) * PIXELS_PER_MINUTE);
+            const bottom = Math.min(totalHeight, (toMinutes(workTime.end) - startMin) * PIXELS_PER_MINUTE);
+            const height = Math.max(34, bottom - top);
+            const hours = formatHours(workTime.start, workTime.end);
+
             return (
               <div
                 key={person.id}
                 className="assignment-card"
                 style={{
+                  top,
+                  height,
                   left: `calc(${index * width}% + 4px)`,
                   width: `calc(${width}% - 8px)`,
                   borderTopColor: person.color,
@@ -203,7 +235,8 @@ function DayColumn({
                   ×
                 </button>
                 <strong>{person.name}</strong>
-                <span>{WORK_START}–{WORK_END}</span>
+                <span>{workTime.start}–{workTime.end}</span>
+                <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h</small>
               </div>
             );
           })}
@@ -218,10 +251,23 @@ export default function App() {
   const [cursorDate, setCursorDate] = useState(new Date());
   const [prompt, setPrompt] = useState('');
   const [message, setMessage] = useState('');
+  const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
 
   const [staff, setStaff] = useState<Staff[]>(() => {
     const saved = localStorage.getItem('scheduler-simple-staff-v1');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed: Staff[] = JSON.parse(saved);
+      return parsed.map((person) => ({
+        ...person,
+        workTimes: {
+          mon: person.workTimes?.mon ?? { start: '08:00', end: '16:30' },
+          tue: person.workTimes?.tue ?? { start: '08:00', end: '16:30' },
+          wed: person.workTimes?.wed ?? { start: '08:00', end: '16:30' },
+          thu: person.workTimes?.thu ?? { start: '08:00', end: '16:30' },
+          fri: person.workTimes?.fri ?? { start: '08:00', end: '16:30' },
+        },
+      }));
+    }
 
     const old = localStorage.getItem('scheduler-employees-v4');
     if (old) {
@@ -238,6 +284,7 @@ export default function App() {
             thu: person.days?.thu ?? true,
             fri: person.days?.fri ?? true,
           },
+          workTimes: defaultWorkTimes(),
         }));
       } catch {
         return defaultStaff;
@@ -384,6 +431,7 @@ export default function App() {
       name: `Person ${staff.length + 1}`,
       color: COLORS[staff.length % COLORS.length],
       days: { mon: true, tue: true, wed: true, thu: true, fri: true },
+    workTimes: defaultWorkTimes(),
     };
     setStaff((current) => [...current, person]);
   }
@@ -391,6 +439,22 @@ export default function App() {
   function updateStaff(id: string, patch: Partial<Staff>) {
     setStaff((current) =>
       current.map((person) => (person.id === id ? { ...person, ...patch } : person))
+    );
+  }
+
+  function updateWorkTime(id: string, day: DayKey, patch: Partial<WorkTime>) {
+    setStaff((current) =>
+      current.map((person) =>
+        person.id === id
+          ? {
+              ...person,
+              workTimes: {
+                ...person.workTimes,
+                [day]: { ...person.workTimes[day], ...patch },
+              },
+            }
+          : person
+      )
     );
   }
 
@@ -488,41 +552,90 @@ export default function App() {
             <div className="settings-heading">
               <div>
                 <h2>Personal</h2>
-                <p>Redigera namn och vilka vardagar personen kan arbeta.</p>
+                <p>Klicka på en person för att redigera namn, arbetsdagar och arbetstider.</p>
               </div>
               <button className="primary" onClick={addStaff}>+ Lägg till person</button>
             </div>
 
             <div className="staff-settings-list">
-              {staff.map((person) => (
-                <article className="staff-settings-card" key={person.id}>
-                  <div className="staff-settings-top">
-                    <span className="color-dot" style={{ background: person.color }} />
-                    <input
-                      value={person.name}
-                      onChange={(event) => updateStaff(person.id, { name: event.target.value })}
-                    />
-                    <button className="delete-person" onClick={() => deleteStaff(person.id)}>Ta bort</button>
-                  </div>
+              {staff.map((person) => {
+                const selected = selectedStaffId === person.id;
+                return (
+                  <article className={`staff-settings-card ${selected ? 'selected' : ''}`} key={person.id}>
+                    <button className="person-summary" onClick={() => setSelectedStaffId(selected ? null : person.id)}>
+                      <span className="color-dot" style={{ background: person.color }} />
+                      <div>
+                        <strong>{person.name}</strong>
+                        <span>{DAY_KEYS.filter((day) => person.days[day]).map((day) => DAY_LABELS[day]).join(' · ')}</span>
+                      </div>
+                      <b>{selected ? '−' : '+'}</b>
+                    </button>
 
-                  <div className="day-toggles">
-                    {DAY_KEYS.map((day) => (
-                      <label key={day}>
-                        <input
-                          type="checkbox"
-                          checked={person.days[day]}
-                          onChange={(event) =>
-                            updateStaff(person.id, {
-                              days: { ...person.days, [day]: event.target.checked },
-                            })
-                          }
-                        />
-                        {DAY_LABELS[day]}
-                      </label>
-                    ))}
-                  </div>
-                </article>
-              ))}
+                    {selected && (
+                      <div className="person-editor">
+                        <div className="staff-settings-top">
+                          <label>
+                            Namn
+                            <input
+                              value={person.name}
+                              onChange={(event) => updateStaff(person.id, { name: event.target.value })}
+                            />
+                          </label>
+                          <button className="delete-person" onClick={() => deleteStaff(person.id)}>Ta bort</button>
+                        </div>
+
+                        <div className="worktime-list">
+                          {DAY_KEYS.map((day) => {
+                            const time = person.workTimes[day];
+                            const hours = formatHours(time.start, time.end);
+                            return (
+                              <div className={`worktime-row ${person.days[day] ? '' : 'disabled'}`} key={day}>
+                                <label className="day-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={person.days[day]}
+                                    onChange={(event) =>
+                                      updateStaff(person.id, {
+                                        days: { ...person.days, [day]: event.target.checked },
+                                      })
+                                    }
+                                  />
+                                  <strong>{DAY_LABELS[day]}</strong>
+                                </label>
+
+                                <label>
+                                  Från
+                                  <input
+                                    type="time"
+                                    disabled={!person.days[day]}
+                                    value={time.start}
+                                    onChange={(event) => updateWorkTime(person.id, day, { start: event.target.value })}
+                                  />
+                                </label>
+
+                                <label>
+                                  Till
+                                  <input
+                                    type="time"
+                                    disabled={!person.days[day]}
+                                    value={time.end}
+                                    onChange={(event) => updateWorkTime(person.id, day, { end: event.target.value })}
+                                  />
+                                </label>
+
+                                <div className="shift-length">
+                                  <span>Passlängd</span>
+                                  <strong>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h</strong>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           </main>
         )}
