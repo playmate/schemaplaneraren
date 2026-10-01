@@ -833,6 +833,97 @@ input:focus {
   opacity: 1;
 }
 
+.empty-slot-warning {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  opacity: 1 !important;
+  pointer-events: auto;
+  cursor: help;
+}
+
+.empty-slot-warning-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 !important;
+  border: 1px solid #eab308;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #854d0e, #422006);
+  color: #fef9c3 !important;
+  font-size: 12px !important;
+  font-weight: 900;
+  line-height: 1;
+  opacity: 1 !important;
+}
+
+.empty-slot-warning-tooltip {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: -4px;
+  z-index: 250;
+  width: 250px;
+  max-width: min(290px, calc(100vw - 32px));
+  padding: 9px 10px;
+  border: 1px solid #a16207;
+  border-radius: 9px;
+  background: #1c1304;
+  color: #fef3c7 !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,.5);
+  font-size: 11px !important;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0 !important;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity .08s ease, transform .08s ease, visibility .08s;
+}
+
+.empty-slot-warning-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-left: 1px solid #a16207;
+  border-top: 1px solid #a16207;
+  background: #1c1304;
+  transform: rotate(45deg);
+}
+
+.empty-slot-warning-tooltip strong,
+.empty-slot-warning-tooltip span {
+  display: block;
+  opacity: 1 !important;
+}
+
+.empty-slot-warning-tooltip > span {
+  margin-top: 4px;
+}
+
+.empty-slot-warning-tooltip .empty-slot-warning-tip {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #713f12;
+  color: #bfdbfe !important;
+  font-weight: 800;
+}
+
+.empty-slot-warning:hover .empty-slot-warning-tooltip {
+  opacity: 1 !important;
+  visibility: visible;
+  transform: translateY(0);
+}
+
 .assignment-card {
   position: absolute;
   border: 1px solid rgba(255,255,255,.12);
