@@ -908,6 +908,25 @@ input:focus {
   line-height: 1;
 }
 
+.assignment-warning {
+  position: absolute;
+  top: 5px;
+  right: 28px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #a16207;
+  border-radius: 999px;
+  background: #422006;
+  color: #fde68a;
+  font-size: 11px;
+  line-height: 1;
+  cursor: help;
+}
+
+
 .remove-assignment:hover {
   background: #450a0a;
   color: #fecaca;
