@@ -34,6 +34,9 @@ button { cursor: pointer; }
 }
 
 .prompt-bar {
+  position: sticky;
+  top: 10px;
+  z-index: 90;
   display: grid;
   grid-template-columns: minmax(180px, auto) minmax(320px, 1fr);
   gap: 8px 18px;
@@ -41,6 +44,7 @@ button { cursor: pointer; }
   border-radius: 16px;
   padding: 14px 16px;
   margin-bottom: 16px;
+  backdrop-filter: blur(12px);
 }
 
 .prompt-copy strong {
@@ -1173,6 +1177,10 @@ input:focus {
 }
 
 @media (max-width: 900px) {
+  .prompt-bar {
+    top: 6px;
+  }
+
   .month-view {
     overflow-x: auto;
   }
