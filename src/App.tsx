@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.4';
+const APP_VERSION = '0.1.5';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -60,6 +60,9 @@ const SWEDISH_DAY_TO_KEY: Record<string, DayKey> = {
   torsdag: 'thu',
   torsdagar: 'thu',
   torsdagen: 'thu',
+  tordag: 'thu',
+  tordagar: 'thu',
+  tordagen: 'thu',
   fredag: 'fri',
   fredagar: 'fri',
   fredagen: 'fri',
@@ -934,6 +937,70 @@ export default function App() {
     return false;
   }
 
+  function replaceAssignmentWithPerson(employeeId: string, assignmentId: string) {
+    const person = staff.find((item) => item.id === employeeId);
+    const target = assignments.find((assignment) => assignment.id === assignmentId);
+    if (!person || !target) return;
+
+    if (target.employeeId === employeeId) {
+      setMessage(`${person.name} har redan det passet.`);
+      return;
+    }
+
+    const date = new Date(`${target.date}T12:00:00`);
+    const day = getDayKey(date);
+
+    if (!person.days[day]) {
+      setMessage(`${person.name} är markerad som ledig ${DAY_LABELS[day]}.`);
+      return;
+    }
+
+    const existingSameDay = assignments.find(
+      (assignment) =>
+        assignment.id !== target.id &&
+        assignment.employeeId === employeeId &&
+        assignment.date === target.date
+    );
+
+    if (existingSameDay) {
+      setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[day]}. Max ett pass per dag.`);
+      return;
+    }
+
+    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const blocked = person.blockedTimes?.[day] ?? [];
+
+    if (
+      toMinutes(workTime.start) > toMinutes(target.start) ||
+      toMinutes(workTime.end) < toMinutes(target.end) ||
+      blocked.some((period) => overlapsTime(target.start, target.end, period))
+    ) {
+      setMessage(`${person.name} är inte tillgänglig ${target.start}–${target.end} på ${DAY_LABELS[day]}.`);
+      return;
+    }
+
+    if (hasBoundaryConflict(employeeId, target.date, target.start, target.end, [target.id])) {
+      setMessage(`Ersättningen stoppades för ${person.name}: undvik flera första/sista pass i rad.`);
+      return;
+    }
+
+    const previousPerson = staff.find((item) => item.id === target.employeeId);
+
+    setAssignments((current) =>
+      current.map((assignment) =>
+        assignment.id === target.id
+          ? { ...assignment, employeeId }
+          : assignment
+      )
+    );
+
+    setMessage(
+      previousPerson
+        ? `${person.name} ersatte ${previousPerson.name} på passet ${target.start}–${target.end}.`
+        : `${person.name} tog passet ${target.start}–${target.end}.`
+    );
+  }
+
   function handleDragEnd(event: any) {
     if (event.canceled) return;
 
@@ -1099,11 +1166,11 @@ export default function App() {
     }
 
     if (sourceId.startsWith('staff:') && targetId.startsWith('assignment:')) {
-      const targetAssignmentId = targetId.replace('assignment:', '');
-      const targetAssignment = assignments.find((assignment) => assignment.id === targetAssignmentId);
-      if (!targetAssignment) return;
-
-      assignPerson(sourceId.replace('staff:', ''), targetAssignment.date);
+      replaceAssignmentWithPerson(
+        sourceId.replace('staff:', ''),
+        targetId.replace('assignment:', '')
+      );
+      return;
     }
   }
 
@@ -2074,7 +2141,26 @@ export default function App() {
         return;
       }
 
-      if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande|kan inte jobba den dagen|kan inte arbeta den dagen/.test(text)) {
+      if (/\b(?:ta\s+bort|plocka\s+bort|radera)\b/.test(text)) {
+        const matchingAssignments = assignments.filter(
+          (assignment) => assignment.employeeId === person.id && assignment.date === dateKey
+        );
+
+        if (matchingAssignments.length) {
+          const removeIds = new Set(matchingAssignments.map((assignment) => assignment.id));
+          setAssignments((current) =>
+            current.filter((assignment) => !removeIds.has(assignment.id))
+          );
+          setMessage(`${person.name} togs bort från ${DAY_LABELS[dayKey]}. Passet lämnades tomt.`);
+        } else {
+          setMessage(`${person.name} hade inget pass på ${DAY_LABELS[dayKey]}.`);
+        }
+
+        setPrompt('');
+        return;
+      }
+
+      if (/sjuk|ledig|vab|semester|borta|frånvarande|kan inte jobba den dagen|kan inte arbeta den dagen/.test(text)) {
         const hasConflict = assignments.some(
           (assignment) => assignment.employeeId === person.id && assignment.date === dateKey
         );
@@ -2176,6 +2262,7 @@ export default function App() {
                 <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “rensa schema”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
                 <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
+                <div><strong>Ta bort utan återfyllnad</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag”</span></div>
                 <div><strong>Börjar senare</strong><span>“Anna börjar 12 på onsdag” · “Erik startar kl 10 torsdag”</span></div>
                 <div><strong>Slutar tidigare</strong><span>“Sara slutar 14 på fredag” · “Erik kan jobba till 15 tisdag”</span></div>
                 <div><strong>Arbetstid en dag</strong><span>“Anna jobbar 10-14 på onsdag” · “Sara arbetar mellan 9 och 15 fredag”</span></div>
