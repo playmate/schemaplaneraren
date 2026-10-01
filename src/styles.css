@@ -1160,7 +1160,7 @@ input:focus {
   transform: translateY(-0.5px);
 }
 
-.assignment-warning-tooltip {
+.assignment-card .assignment-warning-tooltip {
   position: absolute;
   top: 28px;
   right: -8px;
@@ -1193,7 +1193,7 @@ input:focus {
   transform: rotate(45deg);
 }
 
-.assignment-warning-title {
+.assignment-card .assignment-warning-title {
   display: block;
   padding: 9px 12px 8px;
   border-bottom: 1px solid #3f1115;
@@ -1205,13 +1205,13 @@ input:focus {
   text-transform: uppercase;
 }
 
-.assignment-warning-reasons {
+.assignment-card .assignment-warning-reasons {
   display: grid;
   gap: 7px;
   padding: 10px 12px;
 }
 
-.assignment-warning-reason {
+.assignment-card .assignment-warning-reason {
   position: relative;
   display: block;
   padding-left: 12px;
@@ -1221,7 +1221,7 @@ input:focus {
   line-height: 1.45;
 }
 
-.assignment-warning-reason::before {
+.assignment-card .assignment-warning-reason::before {
   content: '';
   position: absolute;
   left: 0;
@@ -1232,7 +1232,7 @@ input:focus {
   background: #ef4444;
 }
 
-.assignment-warning-tip {
+.assignment-card .assignment-warning-tip {
   display: block;
   margin: 0 10px 10px;
   padding: 9px 10px;
@@ -1245,7 +1245,7 @@ input:focus {
   line-height: 1.4;
 }
 
-.assignment-warning-tip::before {
+.assignment-card .assignment-warning-tip::before {
   content: 'Förslag';
   display: block;
   margin-bottom: 3px;
@@ -1256,7 +1256,7 @@ input:focus {
   text-transform: uppercase;
 }
 
-.assignment-warning:hover .assignment-warning-tooltip {
+.assignment-card .assignment-warning:hover .assignment-warning-tooltip {
   display: block;
 }
 
