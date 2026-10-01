@@ -315,7 +315,8 @@ function EmptyShiftDropZone({
   end: string;
   startMin: number;
 }) {
-  const { ref, isDropTarget } = useDroppable({ id: `slot:${dateKey}:${start}:${end}` });
+  const slotId = `slot:${dateKey}:${start.replace(':', '.') }:${end.replace(':', '.')}`;
+  const { ref, isDropTarget } = useDroppable({ id: slotId });
   const top = (toMinutes(start) - startMin) * PIXELS_PER_MINUTE;
   const height = Math.max(34, (toMinutes(end) - toMinutes(start)) * PIXELS_PER_MINUTE);
 
@@ -530,11 +531,18 @@ export default function App() {
     if (!saved) return [];
     const parsed: Array<Partial<Assignment> & { employeeId: string; date: string }> = JSON.parse(saved);
     return parsed.flatMap((assignment, index) => {
+      const rawStart = assignment.start ?? WORK_START;
+      const rawEnd = assignment.end ?? WORK_END;
+
+      if (!/^\d{2}:\d{2}$/.test(rawStart) || !/^\d{2}:\d{2}$/.test(rawEnd)) {
+        return [];
+      }
+
       const base = {
         employeeId: assignment.employeeId,
         date: assignment.date,
-        start: assignment.start ?? WORK_START,
-        end: assignment.end ?? WORK_END,
+        start: rawStart,
+        end: rawEnd,
       };
 
       if (toMinutes(base.start) < toMinutes(LUNCH_START) && toMinutes(base.end) > toMinutes(LUNCH_START)) {
@@ -668,6 +676,11 @@ export default function App() {
   }, [staff, scheduledHoursByPerson]);
 
   function assignPersonToSlot(employeeId: string, dateKey: string, slotStart: string, slotEnd: string) {
+    if (!/^\d{2}:\d{2}$/.test(slotStart) || !/^\d{2}:\d{2}$/.test(slotEnd)) {
+      setMessage('Ogiltig passtid. Försök igen.');
+      return;
+    }
+
     const person = staff.find((item) => item.id === employeeId);
     if (!person) return;
 
@@ -822,7 +835,15 @@ export default function App() {
     const targetId = String(event.operation.target?.id ?? '');
 
     if (sourceId.startsWith('staff:') && targetId.startsWith('slot:')) {
-      const [, dateKey, slotStart, slotEnd] = targetId.split(':');
+      const [, dateKey, encodedStart, encodedEnd] = targetId.split(':');
+      const slotStart = encodedStart?.replace('.', ':');
+      const slotEnd = encodedEnd?.replace('.', ':');
+
+      if (!dateKey || !slotStart || !slotEnd || !/^\d{2}:\d{2}$/.test(slotStart) || !/^\d{2}:\d{2}$/.test(slotEnd)) {
+        setMessage('Kunde inte läsa det lediga passet. Försök igen.');
+        return;
+      }
+
       assignPersonToSlot(sourceId.replace('staff:', ''), dateKey, slotStart, slotEnd);
       return;
     }
