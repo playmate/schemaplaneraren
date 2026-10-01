@@ -1772,3 +1772,40 @@ input:focus {
   font-weight: 900;
   text-transform: uppercase;
 }
+
+
+.assignment-warning.hours {
+  border: 1px solid #64748b;
+  background: linear-gradient(180deg, #334155, #1e293b);
+  color: #dbeafe;
+}
+
+.assignment-warning.hours .assignment-warning-icon {
+  font-size: 11px;
+}
+
+.assignment-warning.hours .assignment-warning-title {
+  border-bottom-color: #334155;
+  background: rgba(51, 65, 85, .35);
+  color: #cbd5e1 !important;
+}
+
+.assignment-warning.hours .assignment-warning-reason::before {
+  background: #94a3b8;
+}
+
+.month-assignment-warning.hours {
+  border: 1px solid #64748b;
+  background: #334155;
+  color: #dbeafe;
+}
+
+.month-assignment-warning.hours .month-assignment-warning-title {
+  border-bottom: 1px solid #334155;
+  background: rgba(51,65,85,.35);
+  color: #cbd5e1 !important;
+}
+
+.month-assignment-warning.hours .month-assignment-warning-icon {
+  font-size: 9px !important;
+}
