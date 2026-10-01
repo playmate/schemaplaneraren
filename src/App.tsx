@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.15';
+const APP_VERSION = '0.1.16';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -320,6 +320,99 @@ function getAssignmentWarnings(
   return uniqueWarnings;
 }
 
+function getEmptySlotSuggestion(
+  dateKey: string,
+  start: string,
+  end: string,
+  allAssignments: Assignment[],
+  weekDateKeys: string[],
+  allStaff: Staff[]
+) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  const day = getDayKey(date);
+  const previousDateKey = localDateKey(addDays(date, -1));
+  const nextDateKey = localDateKey(addDays(date, 1));
+  const slotMinutes = netWorkMinutes(start, end) / 60;
+
+  const weeklyTotals = Object.fromEntries(allStaff.map((item) => [item.id, 0])) as Record<string, number>;
+  for (const assignment of allAssignments) {
+    if (!weekDateKeys.includes(assignment.date)) continue;
+    weeklyTotals[assignment.employeeId] =
+      (weeklyTotals[assignment.employeeId] ?? 0) +
+      netWorkMinutes(assignment.start, assignment.end) / 60;
+  }
+
+  const candidates = allStaff
+    .filter((person) => {
+      if (!person.days[day]) return false;
+
+      const alreadyWorksThatDay = allAssignments.some(
+        (assignment) =>
+          assignment.employeeId === person.id &&
+          assignment.date === dateKey
+      );
+      if (alreadyWorksThatDay) return false;
+
+      const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+      const blocked = person.blockedTimes?.[day] ?? [];
+
+      return (
+        toMinutes(availability.start) <= toMinutes(start) &&
+        toMinutes(availability.end) >= toMinutes(end) &&
+        !blocked.some((period) => overlapsTime(start, end, period))
+      );
+    })
+    .map((person) => {
+      const previous = allAssignments.filter(
+        (assignment) => assignment.employeeId === person.id && assignment.date === previousDateKey
+      );
+      const next = allAssignments.filter(
+        (assignment) => assignment.employeeId === person.id && assignment.date === nextDateKey
+      );
+
+      let boundaryPenalty = 0;
+
+      if (
+        start === WORK_START &&
+        (
+          previous.some((assignment) => assignment.end === WORK_END) ||
+          previous.some((assignment) => assignment.start === WORK_START)
+        )
+      ) {
+        boundaryPenalty += 2;
+      }
+
+      if (
+        end === WORK_END &&
+        (
+          previous.some((assignment) => assignment.end === WORK_END) ||
+          next.some((assignment) => assignment.start === WORK_START)
+        )
+      ) {
+        boundaryPenalty += 2;
+      }
+
+      return {
+        person,
+        boundaryPenalty,
+        projectedWeeklyHours: (weeklyTotals[person.id] ?? 0) + slotMinutes,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.boundaryPenalty - b.boundaryPenalty ||
+        a.projectedWeeklyHours - b.projectedWeeklyHours ||
+        a.person.name.localeCompare(b.person.name, 'sv')
+    );
+
+  const best = candidates[0];
+  if (!best) return 'Ingen tillgänglig person hittades för passet.';
+
+  return best.boundaryPenalty === 0
+    ? `Förslag: lägg ${best.person.name} på passet.`
+    : `Förslag: ${best.person.name} kan ta passet, men det kan skapa en öppnings-/stängningskonflikt.`;
+}
+
 const defaultStaff: Staff[] = [
   {
     id: 'anna',
@@ -529,11 +622,15 @@ function EmptyShiftDropZone({
   start,
   end,
   startMin,
+  showWarning,
+  suggestion,
 }: {
   dateKey: string;
   start: string;
   end: string;
   startMin: number;
+  showWarning: boolean;
+  suggestion: string;
 }) {
   const slotId = `slot:${dateKey}:${start.replace(':', '.') }:${end.replace(':', '.')}`;
   const { ref, isDropTarget } = useDroppable({ id: slotId });
@@ -547,6 +644,16 @@ function EmptyShiftDropZone({
       style={{ top, height }}
     >
       <span>Ledigt {start}–{end}</span>
+      {showWarning && (
+        <span className="empty-slot-warning">
+          <span className="empty-slot-warning-icon" aria-hidden="true">!</span>
+          <span className="empty-slot-warning-tooltip" role="tooltip">
+            <strong>Tomt pass</strong>
+            <span>Det finns bara ett fåtal tomma pass kvar den här veckan.</span>
+            <span className="empty-slot-warning-tip">{suggestion}</span>
+          </span>
+        </span>
+      )}
     </div>
   );
 }
@@ -559,6 +666,7 @@ function DayColumn({
   shiftLengthMinutes,
   allAssignments,
   weekDateKeys,
+  showFewEmptyWarnings,
 }: {
   date: Date;
   staff: Staff[];
@@ -567,6 +675,7 @@ function DayColumn({
   shiftLengthMinutes: number;
   allAssignments: Assignment[];
   weekDateKeys: string[];
+  showFewEmptyWarnings: boolean;
 }) {
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
@@ -662,6 +771,8 @@ function DayColumn({
               start={slot.start}
               end={slot.end}
               startMin={startMin}
+              showWarning={showFewEmptyWarnings}
+              suggestion={getEmptySlotSuggestion(dateKey, slot.start, slot.end, allAssignments, weekDateKeys, staff)}
             />
           ))}
         </div>
@@ -835,6 +946,42 @@ export default function App() {
   );
 
   const visibleDateKeys = useMemo(() => visibleDates.map(localDateKey), [visibleDates]);
+
+  const visibleWeekOpenSlotCount = useMemo(() => {
+    let count = 0;
+
+    for (const date of visibleDates) {
+      const dateKey = localDateKey(date);
+      let slotStart = toMinutes(WORK_START);
+      const workdayEnd = toMinutes(WORK_END);
+
+      while (slotStart < workdayEnd) {
+        if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+          slotStart = toMinutes(LUNCH_END);
+          continue;
+        }
+
+        const start = minutesToTime(slotStart);
+        const end = contiguousShiftEnd(start, WORK_END, shiftLengthMinutes);
+        const endMinutes = Math.min(workdayEnd, toMinutes(end));
+        if (endMinutes <= slotStart) break;
+
+        const slotEnd = minutesToTime(endMinutes);
+        const occupied = assignments.some(
+          (assignment) =>
+            assignment.date === dateKey &&
+            overlapsTime(start, slotEnd, { start: assignment.start, end: assignment.end })
+        );
+
+        if (!occupied) count += 1;
+
+        slotStart = endMinutes;
+        if (slotStart === toMinutes(LUNCH_START)) slotStart = toMinutes(LUNCH_END);
+      }
+    }
+
+    return count;
+  }, [assignments, shiftLengthMinutes, visibleDates]);
 
   const scheduledHoursByPerson = useMemo(() => {
     const totals: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
@@ -2816,6 +2963,7 @@ export default function App() {
                     shiftLengthMinutes={shiftLengthMinutes}
                     allAssignments={assignments}
                     weekDateKeys={visibleDateKeys}
+                    showFewEmptyWarnings={visibleWeekOpenSlotCount > 0 && visibleWeekOpenSlotCount <= 3}
                   />
                 ))}
               </div>
