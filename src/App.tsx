@@ -468,6 +468,7 @@ export default function App() {
   const [cursorDate, setCursorDate] = useState(new Date());
   const [prompt, setPrompt] = useState('');
   const [message, setMessage] = useState('');
+  const [showPromptHelp, setShowPromptHelp] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
   const [shiftLengthMinutes, setShiftLengthMinutes] = useState<number>(() => {
     const saved = localStorage.getItem('scheduler-simple-shift-length-v1');
@@ -1202,6 +1203,192 @@ export default function App() {
     if (clamped !== parsed) setMessage('Passlängden begränsades till intervallet 00:30–08:00.');
   }
 
+  function findFirstAvailableSlotForPerson(
+    person: Staff,
+    dateKey: string,
+    ignoreAssignmentIds: string[] = []
+  ) {
+    const date = new Date(`${dateKey}T12:00:00`);
+    const day = getDayKey(date);
+    if (!person.days[day]) return null;
+
+    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const blocked = person.blockedTimes?.[day] ?? [];
+    const dayAssignments = assignments.filter(
+      (assignment) => assignment.date === dateKey && !ignoreAssignmentIds.includes(assignment.id)
+    );
+
+    let slotStart = toMinutes(WORK_START);
+    const workdayEnd = toMinutes(WORK_END);
+
+    while (slotStart < workdayEnd) {
+      if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+        slotStart = toMinutes(LUNCH_END);
+        continue;
+      }
+
+      const start = minutesToTime(slotStart);
+      const end = contiguousShiftEnd(start, WORK_END, shiftLengthMinutes);
+      const endMinutes = Math.min(workdayEnd, toMinutes(end));
+      if (endMinutes <= slotStart) break;
+
+      const candidate = { start, end: minutesToTime(endMinutes) };
+      const occupied = dayAssignments.some((assignment) =>
+        overlapsTime(candidate.start, candidate.end, {
+          start: assignment.start,
+          end: assignment.end,
+        })
+      );
+
+      const available =
+        !occupied &&
+        toMinutes(workTime.start) <= toMinutes(candidate.start) &&
+        toMinutes(workTime.end) >= toMinutes(candidate.end) &&
+        !blocked.some((period) => overlapsTime(candidate.start, candidate.end, period)) &&
+        !hasBoundaryConflict(person.id, dateKey, candidate.start, candidate.end, ignoreAssignmentIds);
+
+      if (available) return candidate;
+
+      slotStart = endMinutes;
+      if (slotStart === toMinutes(LUNCH_START)) {
+        slotStart = toMinutes(LUNCH_END);
+      }
+    }
+
+    return null;
+  }
+
+  function movePersonBetweenDays(person: Staff, fromDay: DayKey, toDay: DayKey) {
+    const fromDateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(fromDay)));
+    const toDateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(toDay)));
+
+    const source = assignments.find(
+      (assignment) => assignment.employeeId === person.id && assignment.date === fromDateKey
+    );
+
+    if (!source) {
+      setMessage(`${person.name} har inget pass på ${DAY_LABELS[fromDay]}.`);
+      return;
+    }
+
+    if (assignments.some((assignment) => assignment.employeeId === person.id && assignment.date === toDateKey)) {
+      setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[toDay]}.`);
+      return;
+    }
+
+    const targetDate = new Date(`${toDateKey}T12:00:00`);
+    const targetDayKey = getDayKey(targetDate);
+    const workTime = person.workTimes[targetDayKey] ?? { start: WORK_START, end: WORK_END };
+    const blocked = person.blockedTimes?.[targetDayKey] ?? [];
+
+    const sameTimeFree = !assignments.some(
+      (assignment) =>
+        assignment.date === toDateKey &&
+        overlapsTime(source.start, source.end, { start: assignment.start, end: assignment.end })
+    );
+
+    const sameTimeAllowed =
+      person.days[targetDayKey] &&
+      sameTimeFree &&
+      toMinutes(workTime.start) <= toMinutes(source.start) &&
+      toMinutes(workTime.end) >= toMinutes(source.end) &&
+      !blocked.some((period) => overlapsTime(source.start, source.end, period)) &&
+      !hasBoundaryConflict(person.id, toDateKey, source.start, source.end, [source.id]);
+
+    const targetSlot = sameTimeAllowed
+      ? { start: source.start, end: source.end }
+      : findFirstAvailableSlotForPerson(person, toDateKey, [source.id]);
+
+    if (!targetSlot) {
+      setMessage(`Det finns inget giltigt ledigt pass för ${person.name} på ${DAY_LABELS[toDay]}.`);
+      return;
+    }
+
+    setAssignments((current) =>
+      current.map((assignment) =>
+        assignment.id === source.id
+          ? { ...assignment, date: toDateKey, start: targetSlot.start, end: targetSlot.end }
+          : assignment
+      )
+    );
+
+    setMessage(
+      `${person.name} flyttades från ${DAY_LABELS[fromDay]} till ${DAY_LABELS[toDay]} ${targetSlot.start}–${targetSlot.end}.`
+    );
+  }
+
+  function swapPeopleOnDay(first: Staff, second: Staff, day: DayKey) {
+    const dateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(day)));
+    const firstAssignment = assignments.find(
+      (assignment) => assignment.employeeId === first.id && assignment.date === dateKey
+    );
+    const secondAssignment = assignments.find(
+      (assignment) => assignment.employeeId === second.id && assignment.date === dateKey
+    );
+
+    if (!firstAssignment || !secondAssignment) {
+      setMessage(`Både ${first.name} och ${second.name} måste ha ett pass på ${DAY_LABELS[day]}.`);
+      return;
+    }
+
+    const firstConflict = hasBoundaryConflict(
+      first.id,
+      dateKey,
+      secondAssignment.start,
+      secondAssignment.end,
+      [firstAssignment.id, secondAssignment.id]
+    );
+    const secondConflict = hasBoundaryConflict(
+      second.id,
+      dateKey,
+      firstAssignment.start,
+      firstAssignment.end,
+      [firstAssignment.id, secondAssignment.id]
+    );
+
+    if (firstConflict || secondConflict) {
+      setMessage('Bytet stoppades: undvik flera första/sista pass i rad.');
+      return;
+    }
+
+    const firstWorkTime = first.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const secondWorkTime = second.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const firstBlocked = first.blockedTimes?.[day] ?? [];
+    const secondBlocked = second.blockedTimes?.[day] ?? [];
+
+    const firstCanTakeSecond =
+      toMinutes(firstWorkTime.start) <= toMinutes(secondAssignment.start) &&
+      toMinutes(firstWorkTime.end) >= toMinutes(secondAssignment.end) &&
+      !firstBlocked.some((period) =>
+        overlapsTime(secondAssignment.start, secondAssignment.end, period)
+      );
+    const secondCanTakeFirst =
+      toMinutes(secondWorkTime.start) <= toMinutes(firstAssignment.start) &&
+      toMinutes(secondWorkTime.end) >= toMinutes(firstAssignment.end) &&
+      !secondBlocked.some((period) =>
+        overlapsTime(firstAssignment.start, firstAssignment.end, period)
+      );
+
+    if (!firstCanTakeSecond || !secondCanTakeFirst) {
+      setMessage('Bytet går inte eftersom någon inte är tillgänglig under det andra passet.');
+      return;
+    }
+
+    setAssignments((current) =>
+      current.map((assignment) => {
+        if (assignment.id === firstAssignment.id) {
+          return { ...assignment, employeeId: second.id };
+        }
+        if (assignment.id === secondAssignment.id) {
+          return { ...assignment, employeeId: first.id };
+        }
+        return assignment;
+      })
+    );
+
+    setMessage(`${first.name} och ${second.name} bytte plats på ${DAY_LABELS[day]}.`);
+  }
+
   function parsePrompt() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
@@ -1214,6 +1401,45 @@ export default function App() {
 
     if (/^(rensa|töm|nollställ)\s*(schema|schemat)?$/.test(text)) {
       resetVisibleSchedule();
+      setPrompt('');
+      return;
+    }
+
+    const moveMatch = text.match(/^flytta\s+(.+?)\s+från\s+(måndag|tisdag|onsdag|torsdag|fredag)(?:en)?\s+till\s+(måndag|tisdag|onsdag|torsdag|fredag)(?:en)?\.?$/);
+    if (moveMatch) {
+      const personName = moveMatch[1].trim();
+      const personToMove = staff.find(
+        (item) => item.name.toLocaleLowerCase('sv-SE') === personName
+      );
+      const fromDay = SWEDISH_DAY_TO_KEY[moveMatch[2]];
+      const toDay = SWEDISH_DAY_TO_KEY[moveMatch[3]];
+
+      if (!personToMove || !fromDay || !toDay) {
+        setMessage('Kunde inte hitta personen eller dagen i flyttkommandot.');
+      } else {
+        movePersonBetweenDays(personToMove, fromDay, toDay);
+      }
+      setPrompt('');
+      return;
+    }
+
+    const swapMatch = text.match(/^byt\s+plats\s+på\s+(.+?)\s+med\s+(.+?)\s+på\s+(måndag|tisdag|onsdag|torsdag|fredag)(?:en)?\.?$/);
+    if (swapMatch) {
+      const firstName = swapMatch[1].trim();
+      const secondName = swapMatch[2].trim();
+      const firstPerson = staff.find(
+        (item) => item.name.toLocaleLowerCase('sv-SE') === firstName
+      );
+      const secondPerson = staff.find(
+        (item) => item.name.toLocaleLowerCase('sv-SE') === secondName
+      );
+      const swapDay = SWEDISH_DAY_TO_KEY[swapMatch[3]];
+
+      if (!firstPerson || !secondPerson || !swapDay) {
+        setMessage('Kunde inte hitta båda personerna eller dagen i byt-kommandot.');
+      } else {
+        swapPeopleOnDay(firstPerson, secondPerson, swapDay);
+      }
       setPrompt('');
       return;
     }
@@ -1359,7 +1585,26 @@ export default function App() {
             <button className="primary" onClick={parsePrompt}>Kör</button>
           </div>
           <div className="prompt-examples">
-            Exempel: “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag”, “Erik kan inte jobba kl 11 på måndagar”
+            <button
+              className="prompt-help-toggle"
+              type="button"
+              onClick={() => setShowPromptHelp((current) => !current)}
+              aria-expanded={showPromptHelp}
+            >
+              {showPromptHelp ? 'Dölj prompt-hjälp' : 'Vilka prompter fungerar?'}
+            </button>
+
+            {showPromptHelp && (
+              <div className="prompt-help-panel">
+                <div><strong>Skapa schema</strong><span>“skapa schema”</span></div>
+                <div><strong>Lägg till person</strong><span>“lägg till Erik måndag”</span></div>
+                <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag”</span></div>
+                <div><strong>Tidsbegränsning</strong><span>“Erik kan inte jobba kl 11 på måndagar”</span></div>
+                <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag”</span></div>
+                <div><strong>Byt två personer</strong><span>“byt plats på Erik med Anna på måndag”</span></div>
+                <div><strong>Nollställ</strong><span>“rensa schema”</span></div>
+              </div>
+            )}
           </div>
           {message && <div className="message">{message}</div>}
         </section>
