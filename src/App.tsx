@@ -828,11 +828,124 @@ export default function App() {
     setAssignments((current) => current.filter((assignment) => assignment.id !== assignmentId));
   }
 
+  function hasBoundaryConflict(
+    employeeId: string,
+    dateKey: string,
+    start: string,
+    end: string,
+    ignoreIds: string[] = []
+  ) {
+    const date = new Date(`${dateKey}T12:00:00`);
+    const previousDateKey = localDateKey(addDays(date, -1));
+    const nextDateKey = localDateKey(addDays(date, 1));
+
+    const relevant = assignments.filter(
+      (assignment) =>
+        assignment.employeeId === employeeId &&
+        !ignoreIds.includes(assignment.id)
+    );
+
+    const previousAssignments = relevant.filter((assignment) => assignment.date === previousDateKey);
+    const nextAssignments = relevant.filter((assignment) => assignment.date === nextDateKey);
+
+    const isOpening = start === WORK_START;
+    const isClosing = end === WORK_END;
+
+    if (
+      isOpening &&
+      (
+        previousAssignments.some((assignment) => assignment.start === WORK_START) ||
+        previousAssignments.some((assignment) => assignment.end === WORK_END) ||
+        nextAssignments.some((assignment) => assignment.start === WORK_START)
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      isClosing &&
+      (
+        previousAssignments.some((assignment) => assignment.end === WORK_END) ||
+        nextAssignments.some((assignment) => assignment.end === WORK_END) ||
+        nextAssignments.some((assignment) => assignment.start === WORK_START)
+      )
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
   function handleDragEnd(event: any) {
     if (event.canceled) return;
 
     const sourceId = String(event.operation.source?.id ?? '');
     const targetId = String(event.operation.target?.id ?? '');
+
+    if (sourceId.startsWith('assignment:') && targetId.startsWith('slot:')) {
+      const sourceAssignmentId = sourceId.replace('assignment:', '');
+      const [, dateKey, encodedStart, encodedEnd] = targetId.split(':');
+      const slotStart = encodedStart?.replace('.', ':');
+      const slotEnd = encodedEnd?.replace('.', ':');
+
+      if (!dateKey || !slotStart || !slotEnd || !/^\d{2}:\d{2}$/.test(slotStart) || !/^\d{2}:\d{2}$/.test(slotEnd)) {
+        setMessage('Kunde inte läsa det lediga passet. Försök igen.');
+        return;
+      }
+
+      const sourceAssignment = assignments.find((assignment) => assignment.id === sourceAssignmentId);
+      if (!sourceAssignment || sourceAssignment.date !== dateKey) {
+        setMessage('Pass kan bara flyttas till en annan ledig tid samma dag.');
+        return;
+      }
+
+      const person = staff.find((item) => item.id === sourceAssignment.employeeId);
+      if (!person) return;
+
+      const date = new Date(`${dateKey}T12:00:00`);
+      const day = getDayKey(date);
+      const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+      const blocked = person.blockedTimes?.[day] ?? [];
+
+      const occupied = assignments.some(
+        (assignment) =>
+          assignment.id !== sourceAssignmentId &&
+          assignment.date === dateKey &&
+          overlapsTime(slotStart, slotEnd, { start: assignment.start, end: assignment.end })
+      );
+
+      if (occupied) {
+        setMessage('Det passet är inte längre ledigt.');
+        return;
+      }
+
+      if (
+        toMinutes(workTime.start) > toMinutes(slotStart) ||
+        toMinutes(workTime.end) < toMinutes(slotEnd) ||
+        blocked.some((period) => overlapsTime(slotStart, slotEnd, period))
+      ) {
+        setMessage(`${person.name} är inte tillgänglig ${slotStart}–${slotEnd}.`);
+        return;
+      }
+
+      if (hasBoundaryConflict(person.id, dateKey, slotStart, slotEnd, [sourceAssignmentId])) {
+        setMessage(`Flytten stoppades för ${person.name}: undvik flera första/sista pass i rad.`);
+        return;
+      }
+
+      setAssignments((current) =>
+        current.map((assignment) =>
+          assignment.id === sourceAssignmentId
+            ? { ...assignment, start: slotStart, end: slotEnd }
+            : assignment
+        )
+      );
+
+      setMessage(
+        `${person.name} flyttades från ${sourceAssignment.start}–${sourceAssignment.end} till ${slotStart}–${slotEnd}.`
+      );
+      return;
+    }
 
     if (sourceId.startsWith('staff:') && targetId.startsWith('slot:')) {
       const [, dateKey, encodedStart, encodedEnd] = targetId.split(':');
@@ -877,6 +990,26 @@ export default function App() {
 
       if (sourceWouldDuplicate || targetWouldDuplicate) {
         setMessage('Bytet går inte: max ett pass per person och dag.');
+        return;
+      }
+
+      const sourceBoundaryConflict = hasBoundaryConflict(
+        sourceAssignment.employeeId,
+        targetAssignment.date,
+        targetAssignment.start,
+        targetAssignment.end,
+        [sourceAssignmentId, targetAssignmentId]
+      );
+      const targetBoundaryConflict = hasBoundaryConflict(
+        targetAssignment.employeeId,
+        sourceAssignment.date,
+        sourceAssignment.start,
+        sourceAssignment.end,
+        [sourceAssignmentId, targetAssignmentId]
+      );
+
+      if (sourceBoundaryConflict || targetBoundaryConflict) {
+        setMessage('Bytet stoppades: undvik flera första/sista pass i rad.');
         return;
       }
 
