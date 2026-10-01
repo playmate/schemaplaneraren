@@ -35,20 +35,18 @@ button { cursor: pointer; }
 
 .prompt-bar {
   display: grid;
-  grid-template-columns: minmax(220px, auto) minmax(320px, 1fr);
-  gap: 12px 18px;
+  grid-template-columns: minmax(180px, auto) minmax(320px, 1fr);
+  gap: 8px 18px;
   align-items: center;
   border-radius: 16px;
   padding: 14px 16px;
   margin-bottom: 16px;
 }
 
-.prompt-copy strong,
-.prompt-copy span {
+.prompt-copy strong {
   display: block;
 }
 
-.prompt-copy span,
 .panel-title span,
 .settings-heading p,
 .staff-chip span,
@@ -56,9 +54,11 @@ button { cursor: pointer; }
   color: #94a3b8;
 }
 
-.prompt-copy span {
-  font-size: 13px;
-  margin-top: 3px;
+.prompt-examples {
+  grid-column: 2;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .prompt-input-row {
@@ -843,6 +843,10 @@ input:focus {
 @media (max-width: 900px) {
   .prompt-bar {
     grid-template-columns: 1fr;
+  }
+
+  .prompt-examples {
+    grid-column: 1;
   }
 
   .schedule-layout {
