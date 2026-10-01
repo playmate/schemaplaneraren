@@ -178,6 +178,25 @@ input:focus {
   font-weight: 700;
 }
 
+.app-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: clamp(1.55rem, 2vw, 2rem);
