@@ -85,7 +85,7 @@ type TaskAssignment = {
 type Absence = {
   employeeId: string;
   date: string;
-  reason: 'sick' | 'other';
+  reason: 'sick' | 'vab' | 'vacation' | 'leave' | 'other';
 };
 
 type ValidationItem = {
@@ -141,11 +141,11 @@ const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#059669', '#d97706', '#0891b2'
 
 const defaultBusiness: BusinessSettings = {
   days: {
-    mon: { open: true, start: '07:00', end: '17:00' },
-    tue: { open: true, start: '07:00', end: '17:00' },
-    wed: { open: true, start: '07:00', end: '19:00' },
-    thu: { open: true, start: '07:00', end: '17:00' },
-    fri: { open: true, start: '07:00', end: '16:00' },
+    mon: { open: true, start: '08:00', end: '16:30' },
+    tue: { open: true, start: '08:00', end: '16:30' },
+    wed: { open: true, start: '08:00', end: '16:30' },
+    thu: { open: true, start: '08:00', end: '16:30' },
+    fri: { open: true, start: '08:00', end: '16:30' },
     sat: { open: false, start: '09:00', end: '14:00' },
     sun: { open: false, start: '09:00', end: '14:00' },
   },
@@ -195,7 +195,7 @@ const initialEmployees: Employee[] = [
     color: COLORS[0],
     days: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false, sun: false },
     defaultStart: '08:00',
-    defaultEnd: '17:00',
+    defaultEnd: '16:30',
     overrides: {},
     maxHoursDay: 9,
     maxHoursWeek: 40,
@@ -214,7 +214,7 @@ const initialEmployees: Employee[] = [
     color: COLORS[1],
     days: { mon: true, tue: true, wed: true, thu: true, fri: false, sat: false, sun: false },
     defaultStart: '08:00',
-    defaultEnd: '17:00',
+    defaultEnd: '16:30',
     overrides: {},
     maxHoursDay: 8,
     maxHoursWeek: 32,
@@ -233,7 +233,7 @@ const initialEmployees: Employee[] = [
     color: COLORS[2],
     days: { mon: true, tue: true, wed: true, thu: false, fri: true, sat: false, sun: false },
     defaultStart: '09:00',
-    defaultEnd: '16:00',
+    defaultEnd: '16:30',
     overrides: {},
     maxHoursDay: 8,
     maxHoursWeek: 30,
@@ -565,6 +565,8 @@ function ProjectTimelineDay({
   startMin,
   endMin,
   pixelsPerMinute,
+  business,
+  absences,
 }: {
   date: Date;
   project: Project;
@@ -573,11 +575,24 @@ function ProjectTimelineDay({
   startMin: number;
   endMin: number;
   pixelsPerMinute: number;
+  business: BusinessSettings;
+  absences: Absence[];
 }) {
   const byEmployee = Object.fromEntries(employees.map((e) => [e.id, e]));
   const totalHeight = (endMin - startMin) * pixelsPerMinute;
   const dateKey = localDateKey(date);
   const dayTasks = tasks.filter((t) => t.date === dateKey && t.projectId === project.id);
+  const placements = layoutByOverlap(dayTasks);
+  const absent = absences
+    .filter((absence) => absence.date === dateKey)
+    .map((absence) => {
+      const employee = byEmployee[absence.employeeId];
+      const label = absence.reason === 'sick' ? 'sjuk' : absence.reason === 'vab' ? 'VAB' : absence.reason === 'vacation' ? 'semester' : absence.reason === 'leave' ? 'ledig' : 'frånvarande';
+      return employee ? `${employee.name} (${label})` : '';
+    })
+    .filter(Boolean);
+  const lunchTop = (toMinutes(business.lunch.windowStart) - startMin) * pixelsPerMinute;
+  const lunchHeight = Math.max(0, (toMinutes(business.lunch.windowEnd) - toMinutes(business.lunch.windowStart)) * pixelsPerMinute);
 
   return (
     <div className="timeline-day project-mode">
@@ -585,6 +600,7 @@ function ProjectTimelineDay({
         <div>
           <span>{capitalize(new Intl.DateTimeFormat('sv-SE', { weekday: 'short' }).format(date))}</span>
           <small>{project.start}–{project.end}</small>
+          {absent.length > 0 && <small className="absence-summary">Frånvaro: {absent.join(', ')}</small>}
         </div>
         <strong>{date.getDate()}</strong>
       </div>
@@ -595,12 +611,21 @@ function ProjectTimelineDay({
           return <div key={mark} className="timeline-hour-line" style={{ top }} />;
         })}
 
+        {business.lunch.enabled && lunchHeight > 0 && (
+          <div className="timeline-lunch-shade" style={{ top: lunchTop, height: lunchHeight }}>
+            Lunch {business.lunch.windowStart}–{business.lunch.windowEnd}
+          </div>
+        )}
+
         {dayTasks.length === 0 && <div className="timeline-empty">Inga projektpass skapade</div>}
 
-        {dayTasks.map((task) => {
+        {placements.map(({ item: task, column, totalColumns }) => {
           const top = (toMinutes(task.start) - startMin) * pixelsPerMinute;
           const height = Math.max(42, (toMinutes(task.end) - toMinutes(task.start)) * pixelsPerMinute);
           const employee = task.employeeId ? byEmployee[task.employeeId] : undefined;
+
+          const leftPercent = (column / totalColumns) * 100;
+          const widthPercent = 100 / totalColumns;
 
           return (
             <div
@@ -609,8 +634,8 @@ function ProjectTimelineDay({
               style={{
                 top,
                 height,
-                left: '4px',
-                width: 'calc(100% - 8px)',
+                left: `calc(${leftPercent}% + 4px)`,
+                width: `calc(${widthPercent}% - 8px)`,
                 borderLeftColor: employee?.color ?? '#dc2626',
               }}
             >
@@ -633,7 +658,16 @@ function ProjectTimelineDay({
 export default function App() {
   const [employees, setEmployees] = useState<Employee[]>(() => {
     const saved = localStorage.getItem('scheduler-employees-v4');
-    return saved ? JSON.parse(saved) : initialEmployees;
+    if (!saved) return initialEmployees;
+    const parsed: Employee[] = JSON.parse(saved);
+    return parsed.map((employee) => {
+      const wasOldDefault =
+        (employee.defaultStart === '08:00' && employee.defaultEnd === '17:00') ||
+        (employee.defaultStart === '09:00' && employee.defaultEnd === '16:00');
+      return wasOldDefault
+        ? { ...employee, defaultStart: '08:00', defaultEnd: '16:30' }
+        : employee;
+    });
   });
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => {
@@ -670,7 +704,7 @@ export default function App() {
 
   const [view, setView] = useState<ViewMode>('week');
   const [appTab, setAppTab] = useState<AppTab>('schedule');
-  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('staff');
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('project');
   const [cursorDate, setCursorDate] = useState(new Date());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(initialEmployees[0]?.id ?? '');
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjects[0]?.id ?? '');
@@ -763,7 +797,7 @@ export default function App() {
       color: COLORS[employees.length % COLORS.length],
       days: { mon: true, tue: true, wed: true, thu: true, fri: true, sat: false, sun: false },
       defaultStart: '08:00',
-      defaultEnd: '17:00',
+      defaultEnd: '16:30',
       overrides: {},
       maxHoursDay: 8,
       maxHoursWeek: 40,
@@ -1329,23 +1363,11 @@ export default function App() {
 
         <header className="topbar">
           <div>
-            <p className="eyebrow">Schemaplaneraren v0.7</p>
+            <p className="eyebrow">Schemaplaneraren v0.8</p>
             <h1>Planera smartare – nu med riktig tidslinje</h1>
           </div>
 
           <div className="topbar-controls">
-            <div className="schedule-mode-switcher" role="group" aria-label="Välj schematyp">
-              <button className={scheduleMode === 'staff' ? 'active' : ''} onClick={() => setScheduleMode('staff')}>
-                Personal
-              </button>
-              <button
-                className={scheduleMode === 'project' ? 'active' : ''}
-                onClick={() => setScheduleMode('project')}
-              >
-                Projekt / uppgifter
-              </button>
-            </div>
-
             <div className="view-switcher" role="group" aria-label="Välj vy">
               {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
                 <button key={mode} className={view === mode ? 'active' : ''} onClick={() => setView(mode)}>
