@@ -192,6 +192,48 @@ select:focus {
   align-items: start;
 }
 
+.app-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 5px;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  background: rgba(255,255,255,.92);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(15,23,42,.05);
+}
+
+.app-tabs button {
+  border: 0;
+  background: transparent;
+  color: #475569;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.app-tabs button.active {
+  background: #111827;
+  color: #fff;
+}
+
+.workspace.schedule-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace.settings-only {
+  grid-template-columns: minmax(320px, 760px);
+  justify-content: start;
+}
+
+.workspace.settings-only .sidebar {
+  width: 100%;
+}
+
 .sidebar {
   display: grid;
   gap: 14px;
@@ -521,6 +563,12 @@ select:focus {
   font-size: 12px;
 }
 
+.timeline-day-header .absence-summary {
+  margin-top: 4px;
+  color: #b91c1c;
+  font-weight: 800;
+}
+
 .timeline-day-header strong {
   font-size: 24px;
   line-height: 1;
@@ -821,6 +869,14 @@ footer {
 
   .sidebar-tabs {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .app-tabs {
+    width: 100%;
+  }
+
+  .app-tabs button {
+    flex: 1;
   }
 
   .two-cols,
