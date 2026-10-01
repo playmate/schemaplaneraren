@@ -36,6 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
+const APP_VERSION = '0.1.0';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -2046,7 +2047,7 @@ export default function App() {
 
         <header className="app-header">
           <div>
-            <p>Schemaplaneraren</p>
+            <p className="app-kicker">Schemaplaneraren <span className="version-badge">v{APP_VERSION}</span></p>
             <h1>Enkelt veckoschema</h1>
           </div>
           <nav className="tabs">
