@@ -3,6 +3,7 @@ import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 
 type ViewMode = 'day' | 'week' | 'month';
 type ScheduleMode = 'staff' | 'project';
+type AppTab = 'schedule' | 'staff' | 'business' | 'projects';
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 type SidebarTab = 'person' | 'business' | 'projects';
 type ConstraintLevel = 'hard' | 'soft';
@@ -45,6 +46,7 @@ type BusinessSettings = {
   days: Record<DayKey, BusinessDay>;
   lunch: LunchRule;
   maxShiftHours: number;
+  staffAtSameTime: number;
 };
 
 type Project = {
@@ -78,6 +80,12 @@ type TaskAssignment = {
   date: string;
   start: string;
   end: string;
+};
+
+type Absence = {
+  employeeId: string;
+  date: string;
+  reason: 'sick' | 'other';
 };
 
 type ValidationItem = {
@@ -149,6 +157,7 @@ const defaultBusiness: BusinessSettings = {
     paid: false,
   },
   maxShiftHours: 9,
+  staffAtSameTime: 1,
 };
 
 const initialProjects: Project[] = [
@@ -451,6 +460,7 @@ function StaffTimelineDay({
   pixelsPerMinute,
   onRemove,
   onEdit,
+  absences,
 }: {
   date: Date;
   assignments: Assignment[];
@@ -462,6 +472,7 @@ function StaffTimelineDay({
   pixelsPerMinute: number;
   onRemove: (employeeId: string, date: string) => void;
   onEdit: (assignment: Assignment) => void;
+  absences: Absence[];
 }) {
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
@@ -471,6 +482,10 @@ function StaffTimelineDay({
   const byProject = Object.fromEntries(projects.map((p) => [p.id, p]));
   const totalHeight = (endMin - startMin) * pixelsPerMinute;
   const placements = layoutByOverlap(assignments);
+  const absentNames = absences
+    .filter((absence) => absence.date === dateKey)
+    .map((absence) => byEmployee[absence.employeeId]?.name)
+    .filter(Boolean);
 
   return (
     <div className={`timeline-day ${!businessDay.open ? 'closed-day' : ''}`}>
@@ -478,6 +493,7 @@ function StaffTimelineDay({
         <div>
           <span>{capitalize(new Intl.DateTimeFormat('sv-SE', { weekday: 'short' }).format(date))}</span>
           <small>{businessDay.open ? `${businessDay.start}–${businessDay.end}` : 'Stängt'}</small>
+          {absentNames.length > 0 && <small className="absence-summary">Sjuk: {absentNames.join(', ')}</small>}
         </div>
         <strong>{date.getDate()}</strong>
       </div>
@@ -627,7 +643,15 @@ export default function App() {
 
   const [business, setBusiness] = useState<BusinessSettings>(() => {
     const saved = localStorage.getItem('scheduler-business-v4');
-    return saved ? JSON.parse(saved) : defaultBusiness;
+    if (!saved) return defaultBusiness;
+    const parsed = JSON.parse(saved);
+    return {
+      ...defaultBusiness,
+      ...parsed,
+      days: { ...defaultBusiness.days, ...(parsed.days ?? {}) },
+      lunch: { ...defaultBusiness.lunch, ...(parsed.lunch ?? {}) },
+      staffAtSameTime: parsed.staffAtSameTime ?? 1,
+    };
   });
 
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -639,8 +663,13 @@ export default function App() {
     const saved = localStorage.getItem('scheduler-task-assignments-v4');
     return saved ? JSON.parse(saved) : [];
   });
+  const [absences, setAbsences] = useState<Absence[]>(() => {
+    const saved = localStorage.getItem('scheduler-absences-v1');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const [view, setView] = useState<ViewMode>('week');
+  const [appTab, setAppTab] = useState<AppTab>('schedule');
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('staff');
   const [cursorDate, setCursorDate] = useState(new Date());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(initialEmployees[0]?.id ?? '');
@@ -655,6 +684,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('scheduler-business-v4', JSON.stringify(business)), [business]);
   useEffect(() => localStorage.setItem('scheduler-projects-v4', JSON.stringify(projects)), [projects]);
   useEffect(() => localStorage.setItem('scheduler-task-assignments-v4', JSON.stringify(taskAssignments)), [taskAssignments]);
+  useEffect(() => localStorage.setItem('scheduler-absences-v1', JSON.stringify(absences)), [absences]);
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId) ?? employees[0];
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? projects[0];
@@ -862,9 +892,48 @@ export default function App() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
 
+    if (/^(generera|generera schema|full schema|skapa schema|fyll schema|fyll personalschema)$/.test(text)) {
+      setScheduleMode('staff');
+      setAppTab('schedule');
+      autoFillVisible();
+      setPrompt('');
+      return;
+    }
+
     const employee = employees.find((e) => text.includes(e.name.toLocaleLowerCase('sv-SE')));
     const mentionedProject = projects.find((p) => text.includes(p.name.toLocaleLowerCase('sv-SE')));
     let changed = false;
+
+    const sickMatch = text.match(/sjuk\s+(?:på\s+)?([a-zåäö]+)/);
+    if (employee && sickMatch) {
+      const dayKey = SWEDISH_DAY_TO_KEY[sickMatch[1]];
+      if (dayKey && WEEKDAY_KEYS.includes(dayKey)) {
+        const date = addDays(startOfWeek(cursorDate), WEEKDAY_KEYS.indexOf(dayKey));
+        const dateKey = localDateKey(date);
+        setAbsences((current) => [
+          ...current.filter((absence) => !(absence.employeeId === employee.id && absence.date === dateKey)),
+          { employeeId: employee.id, date: dateKey, reason: 'sick' },
+        ]);
+        setAssignments((current) => current.filter((assignment) => !(assignment.employeeId === employee.id && assignment.date === dateKey)));
+        setTaskAssignments((current) => current.map((task) =>
+          task.employeeId === employee.id && task.date === dateKey ? { ...task, employeeId: null } : task
+        ));
+        setAppTab('schedule');
+        setScheduleMode('staff');
+        setPrompt('');
+        setMessage(`${employee.name} markerades sjuk ${DAY_LABELS[dayKey]} ${dateKey} och togs bort från dagens pass.`);
+        return;
+      }
+    }
+
+    const simultaneous = text.match(/(?:antal\s+personal\s+|)(\d+)\s*(?:person(?:al|er)?|anställda?)?\s*(?:ska\s+)?(?:jobba\s+)?samtidigt/);
+    if (simultaneous) {
+      const count = Math.max(1, Number(simultaneous[1]));
+      setBusiness((current) => ({ ...current, staffAtSameTime: count }));
+      setSidebarTab('business');
+      setAppTab('business');
+      changed = true;
+    }
 
     if (employee) {
       let next: Employee = {
@@ -1029,7 +1098,11 @@ export default function App() {
       const businessDay = business.days[day];
       if (!businessDay.open) continue;
 
-      const available = employees.filter((employee) => employee.days[day]);
+      const available = employees.filter(
+        (employee) =>
+          employee.days[day] &&
+          !absences.some((absence) => absence.employeeId === employee.id && absence.date === dateKey)
+      );
       if (!available.length) continue;
 
       // Personalschemat ska lägga ut alla personer som faktiskt arbetar den dagen.
@@ -1044,7 +1117,7 @@ export default function App() {
           .filter((assignment) => assignment.employeeId === b.id)
           .reduce((sum, assignment) => sum + assignmentHours(assignment, business), 0);
         return (bTarget - bCurrent) - (aTarget - aCurrent);
-      });
+      }).slice(0, Math.max(1, business.staffAtSameTime ?? 1));
 
       chosen.forEach((employee) => {
         let start = employee.overrides[day]?.start ?? employee.defaultStart;
@@ -1145,6 +1218,7 @@ export default function App() {
 
         const candidates = employees.filter((employee) => {
           if (!employee.days[day] || !employee.projectIds.includes(selectedProject.id)) return false;
+          if (absences.some((absence) => absence.employeeId === employee.id && absence.date === dateKey)) return false;
 
           const staffShift = assignments.find(
             (assignment) => assignment.employeeId === employee.id && assignment.date === dateKey
@@ -1230,9 +1304,32 @@ export default function App() {
   return (
     <DragDropProvider onDragEnd={handleDragEnd}>
       <div className="app-shell">
+        <section className="prompt-panel">
+          <div>
+            <strong>Skriv en regel</strong>
+            <span>
+              Exempel: “skapa schema”, “full schema”, “Erik sjuk måndag”, “2 personal samtidigt”, “lunch 12-12:30”
+            </span>
+          </div>
+
+          <div className="prompt-row">
+            <input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && parsePrompt()}
+              placeholder="Skriv en instruktion…"
+            />
+            <button className="primary" onClick={parsePrompt}>
+              Tolka
+            </button>
+          </div>
+
+          {message && <div className="status-message">{message}</div>}
+        </section>
+
         <header className="topbar">
           <div>
-            <p className="eyebrow">Schemaplaneraren v0.6</p>
+            <p className="eyebrow">Schemaplaneraren v0.7</p>
             <h1>Planera smartare – nu med riktig tidslinje</h1>
           </div>
 
@@ -1259,44 +1356,16 @@ export default function App() {
           </div>
         </header>
 
-        <section className="prompt-panel">
-          <div>
-            <strong>Skriv en regel</strong>
-            <span>
-              Exempel: “Anna max pass 7,5 timmar”, “Reception maxpass 3 timmar”, “lunch 12-12:30” eller “öppet onsdag
-              07-19”
-            </span>
-          </div>
+        <nav className="app-tabs" aria-label="Huvudflikar">
+          <button className={appTab === 'schedule' ? 'active' : ''} onClick={() => setAppTab('schedule')}>Schema</button>
+          <button className={appTab === 'staff' ? 'active' : ''} onClick={() => { setAppTab('staff'); setSidebarTab('person'); }}>Personalinställningar</button>
+          <button className={appTab === 'business' ? 'active' : ''} onClick={() => { setAppTab('business'); setSidebarTab('business'); }}>Verksamhet</button>
+          <button className={appTab === 'projects' ? 'active' : ''} onClick={() => { setAppTab('projects'); setSidebarTab('projects'); }}>Projekt</button>
+        </nav>
 
-          <div className="prompt-row">
-            <input
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && parsePrompt()}
-              placeholder="Skriv en instruktion…"
-            />
-            <button className="primary" onClick={parsePrompt}>
-              Tolka
-            </button>
-          </div>
-
-          {message && <div className="status-message">{message}</div>}
-        </section>
-
-        <main className="workspace">
+        <main className={`workspace ${appTab === 'schedule' ? 'schedule-only' : 'settings-only'}`}>
+          {appTab !== 'schedule' && (
           <aside className="sidebar">
-            <div className="sidebar-tabs">
-              <button className={sidebarTab === 'person' ? 'active' : ''} onClick={() => setSidebarTab('person')}>
-                Personal
-              </button>
-              <button className={sidebarTab === 'business' ? 'active' : ''} onClick={() => setSidebarTab('business')}>
-                Verksamhet
-              </button>
-              <button className={sidebarTab === 'projects' ? 'active' : ''} onClick={() => setSidebarTab('projects')}>
-                Projekt
-              </button>
-            </div>
-
             {sidebarTab === 'person' && (
               <>
                 <div className="section-title">
@@ -1572,6 +1641,21 @@ export default function App() {
                 </div>
 
                 <div className="subsection">
+                  <strong>Bemanning</strong>
+                  <label>
+                    Personal samtidigt
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={business.staffAtSameTime ?? 1}
+                      onChange={(e) => setBusiness((b) => ({ ...b, staffAtSameTime: Math.max(1, Number(e.target.value)) }))}
+                    />
+                  </label>
+                  <span className="field-help">Standard är 1. Autofyllningen väljer så många tillgängliga personer per dag.</span>
+                </div>
+
+                <div className="subsection">
                   <strong>Passregler</strong>
                   <label>
                     Maxlängd på pass (h)
@@ -1789,7 +1873,9 @@ export default function App() {
               </>
             )}
           </aside>
+          )}
 
+          {appTab === 'schedule' && (
           <section className="main-column">
             <section className="calendar-panel">
               <div className="calendar-toolbar">
@@ -1832,6 +1918,7 @@ export default function App() {
                         pixelsPerMinute={pixelsPerMinute}
                         onRemove={removeAssignment}
                         onEdit={setEditingAssignment}
+                        absences={absences}
                       />
                     );
                   })}
@@ -1894,6 +1981,7 @@ export default function App() {
               )}
             </section>
           </section>
+          )}
         </main>
 
         {editingAssignment && (
@@ -1995,8 +2083,8 @@ export default function App() {
         )}
 
         <footer>
-          Sparas automatiskt lokalt i webbläsaren. v0.6 skiljer på vanliga personalpass och korta projektpass:
-          projektets maxpass påverkar inte längre den anställdes vanliga arbetsdag.
+          Sparas automatiskt lokalt i webbläsaren. v0.7 har Schema som standardflik, promptstyrd schemagenerering,
+          sjukfrånvaro via prompt och inställning för antal personer som ska arbeta samtidigt.
         </footer>
       </div>
     </DragDropProvider>
