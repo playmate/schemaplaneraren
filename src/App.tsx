@@ -20,6 +20,8 @@ type Staff = {
 type Assignment = {
   employeeId: string;
   date: string;
+  start: string;
+  end: string;
 };
 
 const WORK_START = '08:00';
@@ -67,8 +69,47 @@ function defaultWorkTimes(): Record<DayKey, WorkTime> {
   };
 }
 
+function lunchMinutesInside(start: string, end: string) {
+  const overlapStart = Math.max(toMinutes(start), toMinutes(LUNCH_START));
+  const overlapEnd = Math.min(toMinutes(end), toMinutes(LUNCH_END));
+  return Math.max(0, overlapEnd - overlapStart);
+}
+
+function netWorkMinutes(start: string, end: string) {
+  return Math.max(0, toMinutes(end) - toMinutes(start) - lunchMinutesInside(start, end));
+}
+
 function formatHours(start: string, end: string) {
-  return Math.max(0, (toMinutes(end) - toMinutes(start)) / 60);
+  return netWorkMinutes(start, end) / 60;
+}
+
+function durationLabel(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function parseDuration(value: string) {
+  const match = value.trim().match(/^(\d{1,2}):([0-5]\d)$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function endForNetDuration(start: string, availableEnd: string, desiredNetMinutes: number) {
+  const startMin = toMinutes(start);
+  const maxEnd = toMinutes(availableEnd);
+  let current = startMin;
+  let worked = 0;
+
+  while (current < maxEnd && worked < desiredNetMinutes) {
+    const next = Math.min(current + 5, maxEnd);
+    const segmentStart = minutesToTime(current);
+    const segmentEnd = minutesToTime(next);
+    worked += (next - current) - lunchMinutesInside(segmentStart, segmentEnd);
+    current = next;
+  }
+
+  return minutesToTime(current);
 }
 
 const defaultStaff: Staff[] = [
@@ -169,9 +210,12 @@ function DayColumn({
   const dateKey = localDateKey(date);
   const dayKey = getDayKey(date);
   const { ref, isDropTarget } = useDroppable({ id: `day:${dateKey}` });
-  const people = assignments
-    .map((assignment) => staff.find((person) => person.id === assignment.employeeId))
-    .filter(Boolean) as Staff[];
+  const scheduled = assignments
+    .map((assignment) => {
+      const person = staff.find((item) => item.id === assignment.employeeId);
+      return person ? { person, assignment } : null;
+    })
+    .filter(Boolean) as Array<{ person: Staff; assignment: Assignment }>;
 
   const startMin = toMinutes(WORK_START);
   const endMin = toMinutes(WORK_END);
@@ -204,16 +248,16 @@ function DayColumn({
           Lunch {LUNCH_START}–{LUNCH_END}
         </div>
 
-        {people.length === 0 && <div className="empty-day">Dra hit personal</div>}
+        {scheduled.length === 0 && <div className="empty-day">Dra hit personal</div>}
 
         <div className="assignment-layer">
-          {people.map((person, index) => {
-            const width = 100 / Math.max(1, people.length);
-            const workTime = person.workTimes[dayKey] ?? { start: WORK_START, end: WORK_END };
-            const top = Math.max(0, (toMinutes(workTime.start) - startMin) * PIXELS_PER_MINUTE);
-            const bottom = Math.min(totalHeight, (toMinutes(workTime.end) - startMin) * PIXELS_PER_MINUTE);
+          {scheduled.map(({ person, assignment }, index) => {
+            const width = 100 / Math.max(1, scheduled.length);
+            const top = Math.max(0, (toMinutes(assignment.start) - startMin) * PIXELS_PER_MINUTE);
+            const bottom = Math.min(totalHeight, (toMinutes(assignment.end) - startMin) * PIXELS_PER_MINUTE);
             const height = Math.max(34, bottom - top);
-            const hours = formatHours(workTime.start, workTime.end);
+            const hours = formatHours(assignment.start, assignment.end);
+            const lunch = lunchMinutesInside(assignment.start, assignment.end);
 
             return (
               <div
@@ -235,8 +279,8 @@ function DayColumn({
                   ×
                 </button>
                 <strong>{person.name}</strong>
-                <span>{workTime.start}–{workTime.end}</span>
-                <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h</small>
+                <span>{assignment.start}–{assignment.end}</span>
+                <small>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h arbete{lunch ? ` · lunch ${lunch} min` : ''}</small>
               </div>
             );
           })}
@@ -252,6 +296,13 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   const [message, setMessage] = useState('');
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const [shiftLengthMinutes, setShiftLengthMinutes] = useState<number>(() => {
+    const saved = localStorage.getItem('scheduler-simple-shift-length-v1');
+    return saved ? Math.max(30, Number(saved)) : 180;
+  });
+  const [shiftLengthText, setShiftLengthText] = useState(() => durationLabel(
+    Number(localStorage.getItem('scheduler-simple-shift-length-v1') ?? 180)
+  ));
 
   const [staff, setStaff] = useState<Staff[]>(() => {
     const saved = localStorage.getItem('scheduler-simple-staff-v1');
@@ -296,7 +347,14 @@ export default function App() {
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => {
     const saved = localStorage.getItem('scheduler-simple-assignments-v1');
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    const parsed: Array<Partial<Assignment> & { employeeId: string; date: string }> = JSON.parse(saved);
+    return parsed.map((assignment) => ({
+      employeeId: assignment.employeeId,
+      date: assignment.date,
+      start: assignment.start ?? WORK_START,
+      end: assignment.end ?? WORK_END,
+    }));
   });
 
   useEffect(() => {
@@ -306,6 +364,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('scheduler-simple-assignments-v1', JSON.stringify(assignments));
   }, [assignments]);
+
+  useEffect(() => {
+    localStorage.setItem('scheduler-simple-shift-length-v1', String(shiftLengthMinutes));
+    setShiftLengthText(durationLabel(shiftLengthMinutes));
+  }, [shiftLengthMinutes]);
 
   const weekStart = useMemo(() => startOfWeek(cursorDate), [cursorDate]);
   const visibleDates = useMemo(
@@ -325,12 +388,15 @@ export default function App() {
       return;
     }
 
+    const workTime = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+    const end = endForNetDuration(workTime.start, workTime.end, shiftLengthMinutes);
+
     setAssignments((current) => {
       const exists = current.some(
         (assignment) => assignment.employeeId === employeeId && assignment.date === dateKey
       );
       if (exists) return current;
-      return [...current, { employeeId, date: dateKey }];
+      return [...current, { employeeId, date: dateKey, start: workTime.start, end }];
     });
 
     setMessage(`${person.name} lades till ${DAY_LABELS[day]}.`);
@@ -370,7 +436,9 @@ export default function App() {
       const chosen = available[0];
       if (!chosen) continue;
 
-      generated.push({ employeeId: chosen.id, date: dateKey });
+      const workTime = chosen.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+      const end = endForNetDuration(workTime.start, workTime.end, shiftLengthMinutes);
+      generated.push({ employeeId: chosen.id, date: dateKey, start: workTime.start, end });
       counts[chosen.id] = (counts[chosen.id] ?? 0) + 1;
     }
 
@@ -378,7 +446,25 @@ export default function App() {
       ...current.filter((assignment) => !weekKeys.includes(assignment.date)),
       ...generated,
     ]);
-    setMessage('Veckoschemat skapades med en person per vardag.');
+    setMessage(`Veckoschemat skapades med passlängd ${durationLabel(shiftLengthMinutes)}.`);
+  }
+
+  function resetVisibleSchedule() {
+    const keys = visibleDates.map(localDateKey);
+    setAssignments((current) => current.filter((assignment) => !keys.includes(assignment.date)));
+    setMessage('Veckoschemat nollställdes.');
+  }
+
+  function applyShiftLengthText() {
+    const parsed = parseDuration(shiftLengthText);
+    if (parsed === null || parsed < 30) {
+      setMessage('Skriv passlängd som HH:MM, t.ex. 03:00.');
+      setShiftLengthText(durationLabel(shiftLengthMinutes));
+      return;
+    }
+    const clamped = Math.min(8 * 60, Math.max(30, parsed));
+    setShiftLengthMinutes(clamped);
+    if (clamped !== parsed) setMessage('Passlängden begränsades till intervallet 00:30–08:00.');
   }
 
   function parsePrompt() {
@@ -392,9 +478,7 @@ export default function App() {
     }
 
     if (/^(rensa|töm|nollställ)\s*(schema|schemat)?$/.test(text)) {
-      const keys = visibleDates.map(localDateKey);
-      setAssignments((current) => current.filter((assignment) => !keys.includes(assignment.date)));
-      setMessage('Veckoschemat rensades.');
+      resetVisibleSchedule();
       setPrompt('');
       return;
     }
@@ -519,6 +603,38 @@ export default function App() {
                 <button className="secondary" onClick={generateSimpleSchedule}>Skapa schema</button>
               </div>
 
+              <div className="shift-length-control">
+                <div className="shift-length-copy">
+                  <strong>Passlängd</strong>
+                  <span>Arbetstid. Lunch räknas inte in.</span>
+                </div>
+
+                <input
+                  className="shift-slider"
+                  type="range"
+                  min="30"
+                  max="480"
+                  step="30"
+                  value={shiftLengthMinutes}
+                  onChange={(event) => setShiftLengthMinutes(Number(event.target.value))}
+                />
+
+                <div className="shift-duration-input">
+                  <input
+                    value={shiftLengthText}
+                    onChange={(event) => setShiftLengthText(event.target.value)}
+                    onBlur={applyShiftLengthText}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    aria-label="Passlängd i timmar och minuter"
+                  />
+                  <span>HH:MM</span>
+                </div>
+              </div>
+
               <div className="timeline-grid">
                 <div className="time-column">
                   <div className="time-header" />
@@ -542,6 +658,10 @@ export default function App() {
                     onRemove={removeAssignment}
                   />
                 ))}
+              </div>
+
+              <div className="schedule-footer-actions">
+                <button className="reset-button" onClick={resetVisibleSchedule}>Nollställ schema</button>
               </div>
             </section>
           </main>
@@ -588,6 +708,7 @@ export default function App() {
                           {DAY_KEYS.map((day) => {
                             const time = person.workTimes[day];
                             const hours = formatHours(time.start, time.end);
+                            const lunch = lunchMinutesInside(time.start, time.end);
                             return (
                               <div className={`worktime-row ${person.days[day] ? '' : 'disabled'}`} key={day}>
                                 <label className="day-check">
@@ -626,6 +747,7 @@ export default function App() {
                                 <div className="shift-length">
                                   <span>Passlängd</span>
                                   <strong>{hours.toFixed(hours % 1 === 0 ? 0 : 1)} h</strong>
+                                  <small>Lunch {lunch} min</small>
                                 </div>
                               </div>
                             );
