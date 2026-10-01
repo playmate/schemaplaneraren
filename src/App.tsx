@@ -218,6 +218,23 @@ function DayColumn({
     })
     .filter(Boolean) as Array<{ person: Staff; assignment: Assignment }>;
 
+  const laneEnds: number[] = [];
+  const scheduledWithLanes = [...scheduled]
+    .sort((a, b) => toMinutes(a.assignment.start) - toMinutes(b.assignment.start))
+    .map((item) => {
+      const start = toMinutes(item.assignment.start);
+      const end = toMinutes(item.assignment.end);
+      let lane = laneEnds.findIndex((laneEnd) => start >= laneEnd);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(end);
+      } else {
+        laneEnds[lane] = end;
+      }
+      return { ...item, lane };
+    });
+  const laneCount = Math.max(1, laneEnds.length);
+
   const startMin = toMinutes(WORK_START);
   const endMin = toMinutes(WORK_END);
   const totalHeight = (endMin - startMin) * PIXELS_PER_MINUTE;
@@ -249,11 +266,11 @@ function DayColumn({
           Lunch {LUNCH_START}–{LUNCH_END}
         </div>
 
-        {scheduled.length === 0 && <div className="empty-day">Dra hit personal</div>}
+        {scheduledWithLanes.length === 0 && <div className="empty-day">Dra hit personal</div>}
 
         <div className="assignment-layer">
-          {scheduled.map(({ person, assignment }, index) => {
-            const width = 100 / Math.max(1, scheduled.length);
+          {scheduledWithLanes.map(({ person, assignment, lane }) => {
+            const width = 100 / laneCount;
             const top = Math.max(0, (toMinutes(assignment.start) - startMin) * PIXELS_PER_MINUTE);
             const bottom = Math.min(totalHeight, (toMinutes(assignment.end) - startMin) * PIXELS_PER_MINUTE);
             const height = Math.max(34, bottom - top);
@@ -267,7 +284,7 @@ function DayColumn({
                 style={{
                   top,
                   height,
-                  left: `calc(${index * width}% + 4px)`,
+                  left: `calc(${lane * width}% + 4px)`,
                   width: `calc(${width}% - 8px)`,
                   borderTopColor: person.color,
                 }}
