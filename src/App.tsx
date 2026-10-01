@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.23';
+const APP_VERSION = '0.1.24';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -69,6 +69,54 @@ const SWEDISH_DAY_TO_KEY: Record<string, DayKey> = {
 };
 
 const COLORS = ['#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#22d3ee', '#f87171', '#818cf8'];
+
+function hslToHex(h: number, s: number, l: number) {
+  const saturation = s / 100;
+  const lightness = l / 100;
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const segment = h / 60;
+  const x = chroma * (1 - Math.abs((segment % 2) - 1));
+  const m = lightness - chroma / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (segment >= 0 && segment < 1) [r, g, b] = [chroma, x, 0];
+  else if (segment < 2) [r, g, b] = [x, chroma, 0];
+  else if (segment < 3) [r, g, b] = [0, chroma, x];
+  else if (segment < 4) [r, g, b] = [0, x, chroma];
+  else if (segment < 5) [r, g, b] = [x, 0, chroma];
+  else [r, g, b] = [chroma, 0, x];
+
+  const toHex = (value: number) =>
+    Math.round((value + m) * 255).toString(16).padStart(2, '0');
+
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function nextUniqueStaffColor(existingStaff: Staff[]) {
+  const usedColors = new Set(existingStaff.map((person) => person.color.toLowerCase()));
+
+  const paletteColor = COLORS.find((color) => !usedColors.has(color.toLowerCase()));
+  if (paletteColor) return paletteColor;
+
+  for (let index = 0; index < 360; index += 1) {
+    const hue = (index * 137.508) % 360;
+    const candidate = hslToHex(hue, 68, 58);
+    if (!usedColors.has(candidate.toLowerCase())) return candidate;
+  }
+
+  let fallbackIndex = existingStaff.length;
+  while (true) {
+    const candidate = `#${((fallbackIndex * 2654435761) >>> 0)
+      .toString(16)
+      .slice(-6)
+      .padStart(6, '0')}`;
+    if (!usedColors.has(candidate.toLowerCase())) return candidate;
+    fallbackIndex += 1;
+  }
+}
 
 function defaultWorkTimes(): Record<DayKey, WorkTime> {
   return {
@@ -2883,14 +2931,23 @@ export default function App() {
   }
 
   function addStaff() {
+    const usedNames = new Set(
+      staff.map((person) => person.name.trim().toLocaleLowerCase('sv-SE'))
+    );
+
+    let personNumber = 1;
+    while (usedNames.has(`person ${personNumber}`)) {
+      personNumber += 1;
+    }
+
     const id = `person-${Date.now()}`;
     const person: Staff = {
       id,
-      name: `Person ${staff.length + 1}`,
-      color: COLORS[staff.length % COLORS.length],
+      name: `Person ${personNumber}`,
+      color: nextUniqueStaffColor(staff),
       days: { mon: true, tue: true, wed: true, thu: true, fri: true },
-    workTimes: defaultWorkTimes(),
-    blockedTimes: defaultBlockedTimes(),
+      workTimes: defaultWorkTimes(),
+      blockedTimes: defaultBlockedTimes(),
     };
     setStaff((current) => [...current, person]);
   }
