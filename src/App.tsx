@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.14';
+const APP_VERSION = '0.1.15';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -236,7 +236,88 @@ function getAssignmentWarnings(
     );
   }
 
-  return [...new Set(warnings)];
+  const uniqueWarnings = [...new Set(warnings)];
+
+  if (uniqueWarnings.length > 0) {
+    const replacementMinutes = netWorkMinutes(assignment.start, assignment.end) / 60;
+
+    const alternatives = allStaff
+      .filter((candidate) => {
+        if (candidate.id === person.id || !candidate.days[day]) return false;
+
+        const alreadyWorksThatDay = allAssignments.some(
+          (item) =>
+            item.id !== assignment.id &&
+            item.employeeId === candidate.id &&
+            item.date === assignment.date
+        );
+        if (alreadyWorksThatDay) return false;
+
+        const availability = candidate.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+        const candidateBlocked = candidate.blockedTimes?.[day] ?? [];
+
+        return (
+          toMinutes(availability.start) <= toMinutes(assignment.start) &&
+          toMinutes(availability.end) >= toMinutes(assignment.end) &&
+          !candidateBlocked.some((period) => overlapsTime(assignment.start, assignment.end, period))
+        );
+      })
+      .map((candidate) => {
+        const candidatePrevious = allAssignments.filter(
+          (item) => item.employeeId === candidate.id && item.date === previousDateKey
+        );
+        const candidateNext = allAssignments.filter(
+          (item) => item.employeeId === candidate.id && item.date === nextDateKey
+        );
+
+        let boundaryPenalty = 0;
+
+        if (
+          assignment.start === WORK_START &&
+          (
+            candidatePrevious.some((item) => item.end === WORK_END) ||
+            candidatePrevious.some((item) => item.start === WORK_START)
+          )
+        ) {
+          boundaryPenalty += 2;
+        }
+
+        if (
+          assignment.end === WORK_END &&
+          (
+            candidatePrevious.some((item) => item.end === WORK_END) ||
+            candidateNext.some((item) => item.start === WORK_START)
+          )
+        ) {
+          boundaryPenalty += 2;
+        }
+
+        const projectedWeeklyHours =
+          (weeklyTotals[candidate.id] ?? 0) + replacementMinutes;
+
+        return {
+          candidate,
+          boundaryPenalty,
+          projectedWeeklyHours,
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.boundaryPenalty - b.boundaryPenalty ||
+          a.projectedWeeklyHours - b.projectedWeeklyHours ||
+          a.candidate.name.localeCompare(b.candidate.name, 'sv')
+      );
+
+    const bestAlternative = alternatives[0];
+
+    if (bestAlternative && bestAlternative.boundaryPenalty === 0) {
+      uniqueWarnings.push(
+        `Tips: ersätt passet med ${bestAlternative.candidate.name}.`
+      );
+    }
+  }
+
+  return uniqueWarnings;
 }
 
 const defaultStaff: Staff[] = [
@@ -424,7 +505,12 @@ function DraggableAssignmentCard({
           <span className="assignment-warning-icon" aria-hidden="true">!</span>
           <span className="assignment-warning-tooltip" role="tooltip">
             {warnings.map((warning) => (
-              <span key={warning}>{warning}</span>
+              <span
+                key={warning}
+                className={warning.startsWith('Tips:') ? 'assignment-warning-tip' : undefined}
+              >
+                {warning}
+              </span>
             ))}
           </span>
         </span>
