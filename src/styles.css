@@ -1146,12 +1146,21 @@ input:focus {
   place-items: center;
   width: 20px;
   height: 20px;
-  border: 1px solid #ef4444;
   border-radius: 999px;
-  background: linear-gradient(180deg, #7f1d1d, #450a0a);
-  color: #fee2e2;
   box-shadow: 0 2px 8px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
   cursor: help;
+}
+
+.assignment-warning.danger {
+  border: 1px solid #ef4444;
+  background: linear-gradient(180deg, #7f1d1d, #450a0a);
+  color: #fee2e2;
+}
+
+.assignment-warning.notice {
+  border: 1px solid #eab308;
+  background: linear-gradient(180deg, #854d0e, #422006);
+  color: #fef9c3;
 }
 
 .assignment-warning-icon {
@@ -1606,4 +1615,139 @@ input:focus {
   .shift-length {
     grid-column: auto;
   }
+}
+
+
+.assignment-warning.notice .assignment-warning-title {
+  border-bottom-color: #713f12;
+  background: rgba(133, 77, 14, .18);
+  color: #fde68a !important;
+}
+
+.assignment-warning.notice .assignment-warning-reason::before {
+  background: #eab308;
+}
+
+.month-assignment {
+  position: relative;
+  overflow: visible;
+}
+
+.month-day,
+.month-day-assignments {
+  overflow: visible;
+}
+
+.month-assignment-warning {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 30;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: grid !important;
+  place-items: center;
+  cursor: help;
+}
+
+.month-assignment-warning.danger {
+  border: 1px solid #ef4444;
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.month-assignment-warning.notice {
+  border: 1px solid #eab308;
+  background: #854d0e;
+  color: #fef9c3;
+}
+
+.month-assignment-warning-icon {
+  display: grid !important;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 !important;
+  font-size: 10px !important;
+  font-weight: 900;
+  line-height: 16px;
+  color: inherit !important;
+}
+
+.month-assignment-warning-tooltip {
+  position: absolute;
+  top: 22px;
+  right: -4px;
+  z-index: 1200;
+  width: 280px;
+  max-width: min(280px, calc(100vw - 32px));
+  display: none !important;
+  overflow: hidden;
+  border: 1px solid #475569;
+  border-radius: 11px;
+  background: rgba(15,23,42,.99);
+  box-shadow: 0 16px 36px rgba(0,0,0,.52);
+  text-align: left;
+  white-space: normal;
+}
+
+.month-assignment-warning:hover .month-assignment-warning-tooltip {
+  display: block !important;
+}
+
+.month-assignment-warning-title {
+  display: block !important;
+  padding: 8px 10px;
+  font-size: 10px !important;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.month-assignment-warning.danger .month-assignment-warning-title {
+  border-bottom: 1px solid #7f1d1d;
+  background: rgba(127,29,29,.22);
+  color: #fecaca !important;
+}
+
+.month-assignment-warning.notice .month-assignment-warning-title {
+  border-bottom: 1px solid #713f12;
+  background: rgba(133,77,14,.18);
+  color: #fde68a !important;
+}
+
+.month-assignment-warning-reasons {
+  display: grid !important;
+  gap: 6px;
+  padding: 9px 10px;
+}
+
+.month-assignment-warning-reason {
+  display: block !important;
+  color: #e2e8f0 !important;
+  font-size: 10px !important;
+  line-height: 1.4;
+}
+
+.month-assignment-warning-tip {
+  display: block !important;
+  margin: 0 9px 9px;
+  padding: 8px 9px;
+  border: 1px solid #1e3a5f;
+  border-radius: 8px;
+  background: #0b1f33;
+  color: #bfdbfe !important;
+  font-size: 10px !important;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.month-assignment-warning-tip::before {
+  content: 'Förslag';
+  display: block;
+  margin-bottom: 2px;
+  color: #60a5fa;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
