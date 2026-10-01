@@ -436,6 +436,14 @@ input:focus {
   font-size: 11px;
 }
 
+.month-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .month-total-chip {
   display: grid;
   justify-items: end;
@@ -1176,6 +1184,10 @@ input:focus {
 
   .month-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .month-toolbar-actions {
+    justify-content: flex-start;
   }
 
   .month-total-chip {
