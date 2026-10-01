@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.7';
+const APP_VERSION = '0.1.8';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1453,6 +1453,160 @@ export default function App() {
     }
   }
 
+  function generateMonthSchedule() {
+    const year = cursorDate.getFullYear();
+    const month = cursorDate.getMonth();
+    const monthDates: Date[] = [];
+
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    for (let dayNumber = 1; dayNumber <= lastDay; dayNumber += 1) {
+      const date = new Date(year, month, dayNumber);
+      const weekday = date.getDay();
+      if (weekday >= 1 && weekday <= 5) monthDates.push(date);
+    }
+
+    const monthKeys = monthDates.map(localDateKey);
+    const generated: Assignment[] = [];
+    const assignedMinutes: Record<string, number> = Object.fromEntries(
+      staff.map((person) => [person.id, 0])
+    );
+    const closingCounts: Record<string, number> = Object.fromEntries(
+      staff.map((person) => [person.id, 0])
+    );
+    const lastClosingDate: Record<string, string | undefined> = {};
+    const coverageGaps: string[] = [];
+
+    for (const date of monthDates) {
+      const day = getDayKey(date);
+      const dateKey = localDateKey(date);
+      const previousDateKey = localDateKey(addDays(date, -1));
+      let slotStart = toMinutes(WORK_START);
+      const workdayEnd = toMinutes(WORK_END);
+      let slotIndex = 0;
+
+      while (slotStart < workdayEnd) {
+        if (slotStart >= toMinutes(LUNCH_START) && slotStart < toMinutes(LUNCH_END)) {
+          slotStart = toMinutes(LUNCH_END);
+          continue;
+        }
+
+        const slotStartTime = minutesToTime(slotStart);
+        const slotEndTime = contiguousShiftEnd(slotStartTime, WORK_END, shiftLengthMinutes);
+        const slotEnd = Math.min(workdayEnd, toMinutes(slotEndTime));
+        const actualEndTime = minutesToTime(slotEnd);
+
+        if (slotEnd <= slotStart) break;
+
+        const isOpeningShift = slotStart === toMinutes(WORK_START);
+        const isClosingShift = slotEnd === workdayEnd;
+
+        const candidates = staff
+          .filter((person) => {
+            if (!person.days[day]) return false;
+            if (generated.some((assignment) => assignment.employeeId === person.id && assignment.date === dateKey)) {
+              return false;
+            }
+
+            const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
+            const blocked = person.blockedTimes?.[day] ?? [];
+
+            return (
+              toMinutes(availability.start) <= slotStart &&
+              toMinutes(availability.end) >= slotEnd &&
+              !blocked.some((period) => overlapsTime(slotStartTime, actualEndTime, period))
+            );
+          })
+          .map((person) => {
+            const consecutiveClosePenalty =
+              isClosingShift && lastClosingDate[person.id] === previousDateKey ? 80000 : 0;
+
+            const closeThenOpenPenalty =
+              isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
+
+            const closingLoadPenalty =
+              isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
+
+            const sameSlotEarlierThisMonth = generated.filter((assignment) => {
+              if (assignment.employeeId !== person.id) return false;
+              const assignmentDate = new Date(`${assignment.date}T12:00:00`);
+              return (
+                getDayKey(assignmentDate) === day &&
+                assignment.start === slotStartTime &&
+                assignment.end === actualEndTime
+              );
+            }).length;
+
+            const sameBoundaryEarlierThisMonth = generated.filter((assignment) => {
+              if (assignment.employeeId !== person.id) return false;
+              const assignmentDate = new Date(`${assignment.date}T12:00:00`);
+              if (getDayKey(assignmentDate) !== day) return false;
+              return (
+                (isOpeningShift && assignment.start === WORK_START) ||
+                (isClosingShift && assignment.end === WORK_END)
+              );
+            }).length;
+
+            const monthlyRotationPenalty =
+              sameSlotEarlierThisMonth * 3500 +
+              sameBoundaryEarlierThisMonth * 1800;
+
+            const fairnessScore = (assignedMinutes[person.id] ?? 0) * 100;
+
+            return {
+              person,
+              score:
+                fairnessScore +
+                consecutiveClosePenalty +
+                closeThenOpenPenalty +
+                closingLoadPenalty +
+                monthlyRotationPenalty,
+            };
+          })
+          .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+
+        const chosen = candidates[0]?.person;
+
+        if (chosen) {
+          generated.push({
+            id: `auto-month-${dateKey}-${slotIndex}-${chosen.id}`,
+            employeeId: chosen.id,
+            date: dateKey,
+            start: slotStartTime,
+            end: actualEndTime,
+          });
+
+          assignedMinutes[chosen.id] =
+            (assignedMinutes[chosen.id] ?? 0) +
+            netWorkMinutes(slotStartTime, actualEndTime);
+
+          if (isClosingShift) {
+            closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
+            lastClosingDate[chosen.id] = dateKey;
+          }
+        } else {
+          coverageGaps.push(`${date.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })} ${slotStartTime}–${actualEndTime}`);
+        }
+
+        slotStart = slotEnd;
+        if (slotStart === toMinutes(LUNCH_START)) {
+          slotStart = toMinutes(LUNCH_END);
+        }
+        slotIndex += 1;
+      }
+    }
+
+    setAssignments((current) => [
+      ...current.filter((assignment) => !monthKeys.includes(assignment.date)),
+      ...generated,
+    ]);
+
+    setMessage(
+      coverageGaps.length
+        ? `Månadsschemat skapades för ${selectedMonthLabel}, men ${coverageGaps.length} pass saknar tillgänglig personal.`
+        : `Månadsschemat skapades för ${selectedMonthLabel} med jämn fördelning och variation mellan veckorna.`
+    );
+  }
+
   function resetVisibleSchedule() {
     const confirmed = window.confirm(
       `Nollställ schema för vecka ${getIsoWeek(cursorDate)}?\n\nAlla pass i den här veckan tas bort. Personal och inställningar behålls.`
@@ -2017,7 +2171,13 @@ export default function App() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
 
-    if (/^(generera|generera schema|skapa schema|gör schema|full schema|fyll schema|schemalägg)$/.test(text)) {
+    if (/^(skapa|generera|fyll|schemalägg)\s+(månadschema|månadsschema|hela\s+månaden)$/.test(text)) {
+      generateMonthSchedule();
+      setPrompt('');
+      return;
+    }
+
+    if (/^(generera|generera schema|skapa schema|skapa veckoschema|gör schema|full schema|fyll schema|schemalägg)$/.test(text)) {
       generateSimpleSchedule(staff);
       setPrompt('');
       return;
@@ -2421,7 +2581,8 @@ export default function App() {
 
             {showPromptHelp && (
               <div className="prompt-help-panel">
-                <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “generera schema” · “fyll schema”</span></div>
+                <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “skapa veckoschema” · “generera schema” · “fyll schema”</span></div>
+                <div><strong>Skapa hela månaden</strong><span>“skapa månadschema” · “generera månadsschema” · “fyll hela månaden”</span></div>
                 <div><strong>Skapa/gör om en dag</strong><span>“fyll torsdag” · “skapa torsdag” · “schemalägg torsdag” · “gör om fredag” · “generera om tisdag”</span></div>
                 <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” · “nollställ alla scheman”</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
@@ -2506,7 +2667,7 @@ export default function App() {
                   <button onClick={() => setCursorDate(addDays(cursorDate, 7))}>→</button>
                 </div>
                 <h2>Vecka {getIsoWeek(cursorDate)}</h2>
-                <button className="secondary" onClick={() => generateSimpleSchedule(staff)}>Skapa schema</button>
+                <button className="secondary" onClick={() => generateSimpleSchedule(staff)}>Skapa veckoschema</button>
               </div>
 
               <div className="shift-length-control">
@@ -2589,11 +2750,14 @@ export default function App() {
                 <h2>{selectedMonthLabel}</h2>
                 <span>Hela månadens schema, måndag–fredag</span>
               </div>
-              <div className="month-total-chip">
-                <span>Totalt</span>
-                <strong>
-                  {Object.values(monthlyHoursByPerson).reduce((sum, hours) => sum + hours, 0).toFixed(1)} h
-                </strong>
+              <div className="month-toolbar-actions">
+                <button className="secondary" onClick={generateMonthSchedule}>Skapa månadschema</button>
+                <div className="month-total-chip">
+                  <span>Totalt</span>
+                  <strong>
+                    {Object.values(monthlyHoursByPerson).reduce((sum, hours) => sum + hours, 0).toFixed(1)} h
+                  </strong>
+                </div>
               </div>
             </div>
 
