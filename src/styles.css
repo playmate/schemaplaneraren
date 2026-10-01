@@ -246,6 +246,56 @@ input:focus {
   font-size: 1.1rem;
 }
 
+.shift-length-control {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(220px, 1fr) 110px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #263244;
+  border-radius: 12px;
+  background: #0f172a;
+}
+
+.shift-length-copy strong,
+.shift-length-copy span {
+  display: block;
+}
+
+.shift-length-copy span {
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.shift-slider {
+  width: 100%;
+  accent-color: #3b82f6;
+}
+
+.shift-duration-input {
+  display: grid;
+  gap: 3px;
+}
+
+.shift-duration-input input {
+  width: 100%;
+  border: 1px solid #334155;
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: #111827;
+  color: #f8fafc;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.shift-duration-input span {
+  text-align: center;
+  color: #64748b;
+  font-size: 10px;
+}
+
 .week-nav {
   display: flex;
   gap: 6px;
@@ -385,6 +435,27 @@ input:focus {
 
 .assignment-card small {
   color: #94a3b8;
+}
+
+.schedule-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #263244;
+}
+
+.reset-button {
+  border: 1px solid #7f1d1d;
+  background: #2a0c0c;
+  color: #fecaca;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+.reset-button:hover {
+  background: #450a0a;
 }
 
 .remove-assignment {
@@ -587,6 +658,11 @@ input:focus {
   font-size: 13px;
 }
 
+.shift-length small {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
 @media (max-width: 900px) {
   .prompt-bar {
     grid-template-columns: 1fr;
@@ -606,6 +682,10 @@ input:focus {
 
   .worktime-row {
     grid-template-columns: 90px 1fr 1fr;
+  }
+
+  .shift-length-control {
+    grid-template-columns: 1fr;
   }
 
   .shift-length {
