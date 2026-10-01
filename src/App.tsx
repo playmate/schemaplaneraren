@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.12';
+const APP_VERSION = '0.1.13';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -420,8 +420,7 @@ function DraggableAssignmentCard({
         <span
           className="assignment-warning"
           aria-label={`Varning: ${warnings.join(' ')}`}
-          tabIndex={0}
-        >
+         >
           <span className="assignment-warning-icon" aria-hidden="true">!</span>
           <span className="assignment-warning-tooltip" role="tooltip">
             {warnings.map((warning) => (
