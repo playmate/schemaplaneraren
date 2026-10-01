@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.30';
+const APP_VERSION = '0.1.31';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -3238,7 +3238,7 @@ export default function App() {
             </div>
 
             <div className="month-grid">
-              {monthWeeks.flatMap((week, weekIndex) =>
+              {monthWeeks.flatMap((week) =>
                 week.map((date) => {
                   const dateKey = localDateKey(date);
                   const inMonth = date.getMonth() === cursorDate.getMonth();
@@ -3249,7 +3249,21 @@ export default function App() {
                   return (
                     <section
                       key={dateKey}
-                      className={`month-day ${inMonth ? '' : 'outside-month'}`}
+                      className={`month-day month-day-clickable ${inMonth ? '' : 'outside-month'}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Öppna vecka ${getIsoWeek(date)}`}
+                      onClick={() => {
+                        setCursorDate(date);
+                        setTab('schedule');
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setCursorDate(date);
+                          setTab('schedule');
+                        }
+                      }}
                     >
                       <header>
                         <span>v{getIsoWeek(date)}</span>
@@ -3291,7 +3305,10 @@ export default function App() {
                                     <strong>{person.name}</strong>
                                     <span>{assignment.start}–{assignment.end}</span>
                                     {warnings.length > 0 && (
-                                      <span className={`month-assignment-warning ${severity}`}>
+                                      <span
+                                        className={`month-assignment-warning ${severity}`}
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
                                         <span className="month-assignment-warning-icon" aria-hidden="true">!</span>
                                         <span className="month-assignment-warning-tooltip" role="tooltip">
                                           <span className="month-assignment-warning-title">
