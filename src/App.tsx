@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.39';
+const APP_VERSION = '0.1.40';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1224,6 +1224,19 @@ export default function App() {
   }, [assignments, staff, cursorDate]);
 
   const activeStats = statsRange === 'week' ? weeklyStatsByPerson : monthlyStatsByPerson;
+  const maxStatsHours = Math.max(1, ...activeStats.map((item) => item.hours));
+  const maxBoundaryShifts = Math.max(
+    1,
+    ...activeStats.map((item) => Math.max(item.morningShifts, item.closingShifts))
+  );
+  const averageMorningShifts =
+    activeStats.length > 0
+      ? activeStats.reduce((sum, item) => sum + item.morningShifts, 0) / activeStats.length
+      : 0;
+  const averageClosingShifts =
+    activeStats.length > 0
+      ? activeStats.reduce((sum, item) => sum + item.closingShifts, 0) / activeStats.length
+      : 0;
 
   const selectedMonthLabel = useMemo(
     () => cursorDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' }),
@@ -3635,37 +3648,148 @@ export default function App() {
               </div>
             </div>
 
-            <div className="stats-table-wrap">
-              <table className="stats-table">
-                <thead>
-                  <tr>
-                    <th>Person</th>
-                    <th>Timmar</th>
-                    <th>Pass</th>
-                    <th>Morgon</th>
-                    <th>Avslutande</th>
-                    <th>Dagar</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <div className="stats-visual-grid">
+              <section className="stats-card">
+                <div className="stats-card-heading">
+                  <div>
+                    <h3>Arbetstid</h3>
+                    <span>Jämför schemalagda timmar mellan personer</span>
+                  </div>
+                </div>
+
+                <div className="stats-hours-bars">
                   {activeStats.map((item) => (
-                    <tr key={item.person.id}>
-                      <td>
-                        <span className="stats-person">
+                    <div className="stats-bar-row" key={item.person.id}>
+                      <span className="stats-bar-person">
+                        <i style={{ background: item.person.color }} />
+                        {item.person.name}
+                      </span>
+                      <div className="stats-bar-track">
+                        <div
+                          className="stats-bar-fill"
+                          style={{
+                            width: `${Math.max(2, (item.hours / maxStatsHours) * 100)}%`,
+                            background: item.person.color,
+                          }}
+                        />
+                      </div>
+                      <strong>{item.hours.toFixed(1)} h</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="stats-card">
+                <div className="stats-card-heading">
+                  <div>
+                    <h3>Morgon & avslutande</h3>
+                    <span>Se direkt om någon får oproportionerligt många ytterpass</span>
+                  </div>
+                </div>
+
+                <div className="stats-boundary-list">
+                  {activeStats.map((item) => {
+                    const morningHigh =
+                      item.morningShifts >= averageMorningShifts + 1.5 &&
+                      item.morningShifts > 0;
+                    const closingHigh =
+                      item.closingShifts >= averageClosingShifts + 1.5 &&
+                      item.closingShifts > 0;
+
+                    return (
+                      <div className="stats-boundary-row" key={item.person.id}>
+                        <span className="stats-bar-person">
                           <i style={{ background: item.person.color }} />
                           {item.person.name}
                         </span>
-                      </td>
-                      <td><strong>{item.hours.toFixed(1)} h</strong></td>
-                      <td>{item.shiftCount}</td>
-                      <td>{item.morningShifts}</td>
-                      <td>{item.closingShifts}</td>
-                      <td>{item.daysWorked}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+                        <div className="stats-boundary-bars">
+                          <div>
+                            <span>Morgon</span>
+                            <div className="stats-mini-track">
+                              <div
+                                className={`stats-mini-fill morning ${morningHigh ? 'high' : ''}`}
+                                style={{ width: `${Math.max(3, (item.morningShifts / maxBoundaryShifts) * 100)}%` }}
+                              />
+                            </div>
+                            <strong className={morningHigh ? 'stats-count-high' : ''}>
+                              {item.morningShifts}
+                            </strong>
+                          </div>
+
+                          <div>
+                            <span>Avslutande</span>
+                            <div className="stats-mini-track">
+                              <div
+                                className={`stats-mini-fill closing ${closingHigh ? 'high' : ''}`}
+                                style={{ width: `${Math.max(3, (item.closingShifts / maxBoundaryShifts) * 100)}%` }}
+                              />
+                            </div>
+                            <strong className={closingHigh ? 'stats-count-high' : ''}>
+                              {item.closingShifts}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
             </div>
+
+            <section className="stats-details-card">
+              <div className="stats-card-heading">
+                <div>
+                  <h3>Detaljer</h3>
+                  <span>Exakta värden för vald period</span>
+                </div>
+              </div>
+
+              <div className="stats-table-wrap">
+                <table className="stats-table stats-table-compact">
+                  <thead>
+                    <tr>
+                      <th>Person</th>
+                      <th>Timmar</th>
+                      <th>Pass</th>
+                      <th>Morgon</th>
+                      <th>Avslutande</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeStats.map((item) => {
+                      const morningHigh =
+                        item.morningShifts >= averageMorningShifts + 1.5 &&
+                        item.morningShifts > 0;
+                      const closingHigh =
+                        item.closingShifts >= averageClosingShifts + 1.5 &&
+                        item.closingShifts > 0;
+
+                      return (
+                        <tr key={item.person.id}>
+                          <td>
+                            <span className="stats-person">
+                              <i style={{ background: item.person.color }} />
+                              {item.person.name}
+                            </span>
+                          </td>
+                          <td><strong>{item.hours.toFixed(1)} h</strong></td>
+                          <td>{item.shiftCount}</td>
+                          <td className={morningHigh ? 'stats-count-high' : ''}>
+                            {item.morningShifts}
+                            {morningHigh && <span className="stats-up">↑</span>}
+                          </td>
+                          <td className={closingHigh ? 'stats-count-high' : ''}>
+                            {item.closingShifts}
+                            {closingHigh && <span className="stats-up">↑</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </main>
         )}
 
