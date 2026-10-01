@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DragDropProvider, useDraggable, useDroppable } from '@dnd-kit/react';
 
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri';
-type AppTab = 'schedule' | 'month' | 'staff';
+type AppTab = 'schedule' | 'month' | 'stats' | 'staff';
 
 type WorkTime = {
   start: string;
@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.33';
+const APP_VERSION = '0.1.34';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1154,6 +1154,50 @@ export default function App() {
     }
 
     return totals;
+  }, [assignments, staff, cursorDate]);
+
+  const monthlyStatsByPerson = useMemo(() => {
+    const year = cursorDate.getFullYear();
+    const month = cursorDate.getMonth();
+
+    return staff
+      .map((person) => {
+        const personAssignments = assignments.filter((assignment) => {
+          if (assignment.employeeId !== person.id) return false;
+          const date = new Date(`${assignment.date}T12:00:00`);
+          return date.getFullYear() === year && date.getMonth() === month;
+        });
+
+        const hours = personAssignments.reduce(
+          (sum, assignment) => sum + netWorkMinutes(assignment.start, assignment.end) / 60,
+          0
+        );
+        const morningShifts = personAssignments.filter(
+          (assignment) => assignment.start === WORK_START
+        ).length;
+        const closingShifts = personAssignments.filter(
+          (assignment) => assignment.end === WORK_END
+        ).length;
+        const daysWorked = new Set(personAssignments.map((assignment) => assignment.date)).size;
+        const shiftCount = personAssignments.length;
+        const averageShiftHours = shiftCount > 0 ? hours / shiftCount : 0;
+
+        return {
+          person,
+          hours,
+          shiftCount,
+          morningShifts,
+          closingShifts,
+          daysWorked,
+          averageShiftHours,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.hours - a.hours ||
+          b.shiftCount - a.shiftCount ||
+          a.person.name.localeCompare(b.person.name, 'sv')
+      );
   }, [assignments, staff, cursorDate]);
 
   const selectedMonthLabel = useMemo(
@@ -3076,6 +3120,7 @@ export default function App() {
           <nav className="tabs">
             <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}>Schema</button>
             <button className={tab === 'month' ? 'active' : ''} onClick={() => setTab('month')}>Månad</button>
+            <button className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}>Statistik</button>
             <button className={tab === 'staff' ? 'active' : ''} onClick={() => setTab('staff')}>Personal</button>
           </nav>
         </header>
@@ -3390,6 +3435,83 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            </div>
+          </main>
+        )}
+
+        {tab === 'stats' && (
+          <main className="stats-view">
+            <div className="stats-toolbar">
+              <div className="week-nav">
+                <button onClick={() => setCursorDate(addMonths(cursorDate, -1))}>←</button>
+                <button onClick={() => setCursorDate(new Date())}>Idag</button>
+                <button onClick={() => setCursorDate(addMonths(cursorDate, 1))}>→</button>
+              </div>
+              <div>
+                <h2>Statistik</h2>
+                <span>{selectedMonthLabel}</span>
+              </div>
+            </div>
+
+            <div className="stats-summary-cards">
+              <div>
+                <span>Totalt antal timmar</span>
+                <strong>
+                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.hours, 0).toFixed(1)} h
+                </strong>
+              </div>
+              <div>
+                <span>Antal pass</span>
+                <strong>
+                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.shiftCount, 0)}
+                </strong>
+              </div>
+              <div>
+                <span>Morgonpass</span>
+                <strong>
+                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.morningShifts, 0)}
+                </strong>
+              </div>
+              <div>
+                <span>Avslutande pass</span>
+                <strong>
+                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.closingShifts, 0)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="stats-table-wrap">
+              <table className="stats-table">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Timmar</th>
+                    <th>Pass</th>
+                    <th>Morgonpass</th>
+                    <th>Avslutande pass</th>
+                    <th>Dagar</th>
+                    <th>Snitt/pass</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyStatsByPerson.map((item) => (
+                    <tr key={item.person.id}>
+                      <td>
+                        <span className="stats-person">
+                          <i style={{ background: item.person.color }} />
+                          {item.person.name}
+                        </span>
+                      </td>
+                      <td><strong>{item.hours.toFixed(1)} h</strong></td>
+                      <td>{item.shiftCount}</td>
+                      <td>{item.morningShifts}</td>
+                      <td>{item.closingShifts}</td>
+                      <td>{item.daysWorked}</td>
+                      <td>{item.averageShiftHours.toFixed(1)} h</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </main>
         )}
