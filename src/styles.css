@@ -951,10 +951,10 @@ input:focus {
   place-items: center;
   width: 20px;
   height: 20px;
-  border: 1px solid #f59e0b;
+  border: 1px solid #ef4444;
   border-radius: 999px;
-  background: linear-gradient(180deg, #78350f, #451a03);
-  color: #fff7ed;
+  background: linear-gradient(180deg, #7f1d1d, #450a0a);
+  color: #fee2e2;
   box-shadow: 0 2px 8px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
   cursor: help;
 }
@@ -971,24 +971,40 @@ input:focus {
 
 .assignment-warning-tooltip {
   position: absolute;
-  top: calc(100% + 6px);
-  right: -2px;
+  top: calc(100% + 7px);
+  right: -4px;
   z-index: 200;
-  display: none;
-  width: max-content;
-  max-width: 280px;
-  padding: 8px 10px;
-  border: 1px solid #475569;
+  width: 240px;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 9px 10px;
+  border: 1px solid #7f1d1d;
   border-radius: 9px;
-  background: #020617;
-  color: #e2e8f0;
-  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  background: #170708;
+  color: #fee2e2;
+  box-shadow: 0 10px 28px rgba(0,0,0,.5);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
   text-align: left;
   white-space: normal;
   pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity .08s ease, transform .08s ease, visibility .08s;
+}
+
+.assignment-warning-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-left: 1px solid #7f1d1d;
+  border-top: 1px solid #7f1d1d;
+  background: #170708;
+  transform: rotate(45deg);
 }
 
 .assignment-warning-tooltip span {
@@ -996,17 +1012,16 @@ input:focus {
 }
 
 .assignment-warning-tooltip span + span {
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 1px solid #1e293b;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #3f1115;
 }
 
-.assignment-warning:hover .assignment-warning-tooltip,
-.assignment-warning:focus .assignment-warning-tooltip,
-.assignment-warning:focus-visible .assignment-warning-tooltip {
-  display: block;
+.assignment-warning:hover .assignment-warning-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
-
 
 .remove-assignment:hover {
   background: #450a0a;
