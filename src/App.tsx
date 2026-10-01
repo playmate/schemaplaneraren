@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.11';
+const APP_VERSION = '0.1.12';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -2589,7 +2589,7 @@ export default function App() {
                 <div><strong>Skapa hela veckan</strong><span>“skapa schema” · “skapa veckoschema” · “generera schema” · “fyll schema”</span></div>
                 <div><strong>Skapa hela månaden</strong><span>“skapa månadschema” · “generera månadsschema” · “fyll hela månaden”</span></div>
                 <div><strong>Skapa/gör om en dag</strong><span>“fyll torsdag” · “skapa torsdag” · “schemalägg torsdag” · “gör om fredag” · “generera om tisdag”</span></div>
-                <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” · “nollställ alla scheman”</span></div>
+                <div><strong>Rensa</strong><span>“rensa fredag” · “töm onsdag” · “nollställ schema” (aktuell vecka) · “nollställ alla scheman” (alla veckor)</span></div>
                 <div><strong>Lägg till person</strong><span>“lägg till Erik måndag” · “schemalägg Erik fredag”</span></div>
                 <div><strong>Frånvaro</strong><span>“Sara sjuk tisdag” · “Erik ledig fredag” · “Anna vab onsdag”</span></div>
                 <div><strong>Ta bort utan ersättare</strong><span>“ta bort Anna från torsdag” · “plocka bort Erik fredag” · “radera Sara från måndag”</span></div>
@@ -2736,7 +2736,7 @@ export default function App() {
               </div>
 
               <div className="schedule-footer-actions">
-                <button className="reset-button" onClick={resetVisibleSchedule}>Nollställ schema</button>
+                <button className="reset-button" onClick={resetVisibleSchedule}>Nollställ veckoschema</button>
                 <button className="reset-all-button" onClick={resetAllSchedules}>Nollställ alla scheman</button>
               </div>
             </section>
