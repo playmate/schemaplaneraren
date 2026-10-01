@@ -636,7 +636,7 @@ input:focus {
 
 .shift-length-control {
   display: grid;
-  grid-template-columns: minmax(150px, auto) minmax(220px, 1fr) 110px;
+  grid-template-columns: minmax(150px, auto) minmax(220px, 1fr) 110px minmax(190px, auto);
   gap: 14px;
   align-items: center;
   padding: 12px;
@@ -660,6 +660,77 @@ input:focus {
 .shift-slider {
   width: 100%;
   accent-color: #3b82f6;
+}
+
+.override-toggle {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #111827;
+  cursor: pointer;
+  user-select: none;
+}
+
+.override-toggle.active {
+  border-color: #dc2626;
+  background: #1f1114;
+}
+
+.override-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.override-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: #334155;
+  transition: background .12s ease;
+}
+
+.override-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  transition: transform .12s ease;
+}
+
+.override-toggle.active .override-switch {
+  background: #b91c1c;
+}
+
+.override-toggle.active .override-switch::after {
+  transform: translateX(16px);
+}
+
+.override-copy strong,
+.override-copy small {
+  display: block;
+}
+
+.override-copy strong {
+  color: #e2e8f0;
+  font-size: 11px;
+}
+
+.override-copy small {
+  margin-top: 1px;
+  color: #64748b;
+  font-size: 9px;
+  line-height: 1.2;
 }
 
 .shift-duration-input {
