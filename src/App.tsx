@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.37';
+const APP_VERSION = '0.1.38';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1883,6 +1883,11 @@ export default function App() {
 
             return {
               person,
+              boundaryLoad: isOpeningShift
+                ? (openingCounts[person.id] ?? 0)
+                : isClosingShift
+                  ? (closingCounts[person.id] ?? 0)
+                  : 0,
               score:
                 fairnessScore +
                 consecutiveClosePenalty +
@@ -1892,7 +1897,12 @@ export default function App() {
                 monthlyRotationPenalty,
             };
           })
-          .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+          .sort(
+            (a, b) =>
+              a.boundaryLoad - b.boundaryLoad ||
+              a.score - b.score ||
+              a.person.name.localeCompare(b.person.name, 'sv')
+          );
 
         const chosen = candidates[0]?.person;
 
@@ -2058,6 +2068,11 @@ export default function App() {
 
             return {
               person,
+              boundaryLoad: isOpeningShift
+                ? (openingCounts[person.id] ?? 0)
+                : isClosingShift
+                  ? (closingCounts[person.id] ?? 0)
+                  : 0,
               score:
                 fairnessScore +
                 consecutiveClosePenalty +
@@ -2067,7 +2082,12 @@ export default function App() {
                 monthlyRotationPenalty,
             };
           })
-          .sort((a, b) => a.score - b.score || a.person.name.localeCompare(b.person.name, 'sv'));
+          .sort(
+            (a, b) =>
+              a.boundaryLoad - b.boundaryLoad ||
+              a.score - b.score ||
+              a.person.name.localeCompare(b.person.name, 'sv')
+          );
 
         const chosen = candidates[0]?.person;
 
@@ -2083,6 +2103,10 @@ export default function App() {
           assignedMinutes[chosen.id] =
             (assignedMinutes[chosen.id] ?? 0) +
             netWorkMinutes(slotStartTime, actualEndTime);
+
+          if (isOpeningShift) {
+            openingCounts[chosen.id] = (openingCounts[chosen.id] ?? 0) + 1;
+          }
 
           if (isClosingShift) {
             closingCounts[chosen.id] = (closingCounts[chosen.id] ?? 0) + 1;
