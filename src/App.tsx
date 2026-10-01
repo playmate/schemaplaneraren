@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.2';
+const APP_VERSION = '0.1.3';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -2000,7 +2000,9 @@ export default function App() {
         return;
       }
 
-      const cannotWorkAt = text.match(/kan\s+inte\s+(?:jobba|arbeta)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/);
+      const cannotWorkAt = text.match(
+        /(?:kan\s+inte\s+(?:jobba|arbeta)|är\s+inte\s+tillgänglig|inte\s+tillgänglig|upptagen)(?:\s+kl(?:ockan)?\.?)?\s*(\d{1,2})(?::(\d{2}))?/
+      );
       if (cannotWorkAt) {
         const hour = Math.min(23, Number(cannotWorkAt[1]));
         const minute = Number(cannotWorkAt[2] ?? 0);
@@ -2153,7 +2155,7 @@ export default function App() {
                 <div><strong>Slutar tidigare</strong><span>“Sara slutar 14 på fredag” · “Erik kan jobba till 15 tisdag”</span></div>
                 <div><strong>Arbetstid en dag</strong><span>“Anna jobbar 10-14 på onsdag” · “Sara arbetar mellan 9 och 15 fredag”</span></div>
                 <div><strong>Inte före/efter</strong><span>“Erik kan inte jobba före 10 måndag” · “Sara kan inte jobba efter 14 tisdag”</span></div>
-                <div><strong>Blockerad tid</strong><span>“Erik kan inte jobba 10-12 på torsdag” · “Anna kan inte jobba kl 11 på måndagar”</span></div>
+                <div><strong>Blockerad tid</strong><span>“Anna kan inte jobba kl 11 på torsdag” · “Erik kan inte jobba 10-12 torsdag” · “Sara är inte tillgänglig kl 14 fredag” · “Anna upptagen 11 torsdag”</span></div>
                 <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag” · “flytta Anna till måndag” · “flytta över Sara till fredag”</span></div>
                 <div><strong>Byt två personer</strong><span>“byt Erik med Sara på tisdag” · “byt plats på Erik och Sara på tisdag”</span></div>
                 <div><strong>Visa en dag</strong><span>“vem jobbar fredag?” · “visa schema tisdag”</span></div>
