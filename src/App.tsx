@@ -602,6 +602,24 @@ export default function App() {
       const sourcePerson = staff.find((person) => person.id === sourceAssignment.employeeId);
       const targetPerson = staff.find((person) => person.id === targetAssignment.employeeId);
 
+      const sourceWouldDuplicate = assignments.some(
+        (assignment) =>
+          assignment.id !== targetAssignmentId &&
+          assignment.employeeId === sourceAssignment.employeeId &&
+          assignment.date === targetAssignment.date
+      );
+      const targetWouldDuplicate = assignments.some(
+        (assignment) =>
+          assignment.id !== sourceAssignmentId &&
+          assignment.employeeId === targetAssignment.employeeId &&
+          assignment.date === sourceAssignment.date
+      );
+
+      if (sourceWouldDuplicate || targetWouldDuplicate) {
+        setMessage('Bytet går inte: max ett pass per person och dag.');
+        return;
+      }
+
       setAssignments((current) =>
         current.map((assignment) => {
           if (assignment.id === sourceAssignmentId) {
@@ -674,6 +692,7 @@ export default function App() {
           .filter((person) => {
             if (!person.days[day]) return false;
             if (excluded.some((entry) => entry.employeeId === person.id && entry.date === dateKey)) return false;
+            if (generated.some((assignment) => assignment.employeeId === person.id && assignment.date === dateKey)) return false;
             const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
             const blocked = person.blockedTimes?.[day] ?? [];
             return (
@@ -684,10 +703,6 @@ export default function App() {
           })
           .map((person) => {
             const previous = lastWorkedSlot[person.id];
-
-            // Starkt undvik flera pass direkt efter varandra samma dag.
-            const backToBackPenalty =
-              previous?.date === dateKey && previous.end === slotStartTime ? 100000 : 0;
 
             // Undvik att samma person får sista passet flera dagar i rad.
             const consecutiveClosePenalty =
@@ -708,7 +723,6 @@ export default function App() {
               person,
               score:
                 fairnessScore +
-                backToBackPenalty +
                 consecutiveClosePenalty +
                 closeThenOpenPenalty +
                 closingLoadPenalty,
