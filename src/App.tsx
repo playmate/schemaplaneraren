@@ -480,6 +480,21 @@ export default function App() {
     [weekStart]
   );
 
+  const visibleDateKeys = useMemo(() => visibleDates.map(localDateKey), [visibleDates]);
+
+  const scheduledHoursByPerson = useMemo(() => {
+    const totals: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+
+    for (const assignment of assignments) {
+      if (!visibleDateKeys.includes(assignment.date)) continue;
+      totals[assignment.employeeId] =
+        (totals[assignment.employeeId] ?? 0) +
+        netWorkMinutes(assignment.start, assignment.end) / 60;
+    }
+
+    return totals;
+  }, [assignments, staff, visibleDateKeys]);
+
   function assignPerson(employeeId: string, dateKey: string) {
     const person = staff.find((item) => item.id === employeeId);
     if (!person) return;
@@ -594,6 +609,7 @@ export default function App() {
         }
 
         const isClosingShift = slotEnd === workdayEnd;
+        const isOpeningShift = slotStart === toMinutes(WORK_START);
 
         const candidates = staff
           .filter((person) => {
@@ -612,6 +628,10 @@ export default function App() {
             const consecutiveClosePenalty =
               isClosingShift && lastClosingDate[person.id] === previousDateKey ? 80000 : 0;
 
+            // Undvik stängning dag 1 följt av öppning dag 2.
+            const closeThenOpenPenalty =
+              isOpeningShift && lastClosingDate[person.id] === previousDateKey ? 90000 : 0;
+
             // Sprid generellt stängningspassen jämnt över veckan.
             const closingLoadPenalty =
               isClosingShift ? (closingCounts[person.id] ?? 0) * 20000 : 0;
@@ -625,6 +645,7 @@ export default function App() {
                 fairnessScore +
                 backToBackPenalty +
                 consecutiveClosePenalty +
+                closeThenOpenPenalty +
                 closingLoadPenalty,
             };
           })
@@ -674,7 +695,7 @@ export default function App() {
     if (coverageGaps.length) {
       setMessage(`Schemat skapades, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`);
     } else {
-      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)} och hänsyn till jämn fördelning, flera pass i rad och avslutande pass.`);
+      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)} och hänsyn till jämn fördelning, flera pass i rad, avslutande pass och stängning följt av öppning nästa dag.`);
     }
   }
 
@@ -820,6 +841,24 @@ export default function App() {
               </div>
               <div className="staff-list">
                 {staff.map((person) => <DraggableStaff key={person.id} person={person} />)}
+              </div>
+
+              <div className="hours-summary">
+                <div className="hours-summary-title">
+                  <strong>Schemalagda timmar</strong>
+                  <span>Den här veckan</span>
+                </div>
+                <div className="hours-summary-list">
+                  {staff.map((person) => (
+                    <div className="hours-summary-row" key={person.id}>
+                      <span>
+                        <i style={{ background: person.color }} />
+                        {person.name}
+                      </span>
+                      <strong>{(scheduledHoursByPerson[person.id] ?? 0).toFixed(1)} h</strong>
+                    </div>
+                  ))}
+                </div>
               </div>
             </aside>
 
