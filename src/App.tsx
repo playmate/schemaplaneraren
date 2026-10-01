@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.35';
+const APP_VERSION = '0.1.36';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -942,6 +942,7 @@ export default function App() {
   const [message, setMessage] = useState('');
   const [showPromptHelp, setShowPromptHelp] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
+  const [statsRange, setStatsRange] = useState<'week' | 'month'>('week');
   const [shiftLengthMinutes, setShiftLengthMinutes] = useState<number>(() => {
     const saved = localStorage.getItem('scheduler-simple-shift-length-v1');
     return saved ? Math.max(30, Number(saved)) : 120;
@@ -1169,24 +1170,18 @@ export default function App() {
           (sum, assignment) => sum + netWorkMinutes(assignment.start, assignment.end) / 60,
           0
         );
-        const morningShifts = personAssignments.filter(
-          (assignment) => assignment.start === WORK_START
-        ).length;
-        const closingShifts = personAssignments.filter(
-          (assignment) => assignment.end === WORK_END
-        ).length;
-        const daysWorked = new Set(personAssignments.map((assignment) => assignment.date)).size;
-        const shiftCount = personAssignments.length;
-        const averageShiftHours = shiftCount > 0 ? hours / shiftCount : 0;
 
         return {
           person,
           hours,
-          shiftCount,
-          morningShifts,
-          closingShifts,
-          daysWorked,
-          averageShiftHours,
+          shiftCount: personAssignments.length,
+          morningShifts: personAssignments.filter(
+            (assignment) => assignment.start === WORK_START
+          ).length,
+          closingShifts: personAssignments.filter(
+            (assignment) => assignment.end === WORK_END
+          ).length,
+          daysWorked: new Set(personAssignments.map((assignment) => assignment.date)).size,
         };
       })
       .sort(
@@ -1197,6 +1192,47 @@ export default function App() {
           a.person.name.localeCompare(b.person.name, 'sv')
       );
   }, [assignments, staff, visibleDateKeys]);
+
+  const monthlyStatsByPerson = useMemo(() => {
+    const year = cursorDate.getFullYear();
+    const month = cursorDate.getMonth();
+
+    return staff
+      .map((person) => {
+        const personAssignments = assignments.filter((assignment) => {
+          if (assignment.employeeId !== person.id) return false;
+          const date = new Date(`${assignment.date}T12:00:00`);
+          return date.getFullYear() === year && date.getMonth() === month;
+        });
+
+        const hours = personAssignments.reduce(
+          (sum, assignment) => sum + netWorkMinutes(assignment.start, assignment.end) / 60,
+          0
+        );
+
+        return {
+          person,
+          hours,
+          shiftCount: personAssignments.length,
+          morningShifts: personAssignments.filter(
+            (assignment) => assignment.start === WORK_START
+          ).length,
+          closingShifts: personAssignments.filter(
+            (assignment) => assignment.end === WORK_END
+          ).length,
+          daysWorked: new Set(personAssignments.map((assignment) => assignment.date)).size,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.hours - a.hours ||
+          b.morningShifts - a.morningShifts ||
+          b.closingShifts - a.closingShifts ||
+          a.person.name.localeCompare(b.person.name, 'sv')
+      );
+  }, [assignments, staff, cursorDate]);
+
+  const activeStats = statsRange === 'week' ? weeklyStatsByPerson : monthlyStatsByPerson;
 
   const selectedMonthLabel = useMemo(
     () => cursorDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' }),
@@ -3440,17 +3476,57 @@ export default function App() {
         {tab === 'stats' && (
           <main className="stats-view">
             <div className="stats-toolbar">
-              <div className="week-nav">
-                <button onClick={() => setCursorDate(addDays(cursorDate, -7))}>←</button>
-                <button onClick={() => setCursorDate(new Date())}>Idag</button>
-                <button onClick={() => setCursorDate(addDays(cursorDate, 7))}>→</button>
+              <div className="stats-range-toggle" role="group" aria-label="Statistikperiod">
+                <button
+                  className={statsRange === 'week' ? 'active' : ''}
+                  onClick={() => setStatsRange('week')}
+                >
+                  Vecka
+                </button>
+                <button
+                  className={statsRange === 'month' ? 'active' : ''}
+                  onClick={() => setStatsRange('month')}
+                >
+                  Månad
+                </button>
               </div>
-              <div>
-                <h2>Statistik · Vecka {getIsoWeek(cursorDate)}</h2>
+
+              <div className="stats-period-nav">
+                <button
+                  onClick={() =>
+                    setCursorDate(
+                      statsRange === 'week'
+                        ? addDays(cursorDate, -7)
+                        : addMonths(cursorDate, -1)
+                    )
+                  }
+                >
+                  ←
+                </button>
+                <button onClick={() => setCursorDate(new Date())}>Idag</button>
+                <button
+                  onClick={() =>
+                    setCursorDate(
+                      statsRange === 'week'
+                        ? addDays(cursorDate, 7)
+                        : addMonths(cursorDate, 1)
+                    )
+                  }
+                >
+                  →
+                </button>
+              </div>
+
+              <div className="stats-heading">
+                <h2>
+                  {statsRange === 'week'
+                    ? `Vecka ${getIsoWeek(cursorDate)}`
+                    : selectedMonthLabel}
+                </h2>
                 <span>
-                  {visibleDates[0].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
-                  {' – '}
-                  {visibleDates[4].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {statsRange === 'week'
+                    ? `${visibleDates[0].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })} – ${visibleDates[4].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                    : 'Månadsstatistik'}
                 </span>
               </div>
             </div>
@@ -3458,27 +3534,19 @@ export default function App() {
             <div className="stats-summary-cards">
               <div>
                 <span>Totalt antal timmar</span>
-                <strong>
-                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.hours, 0).toFixed(1)} h
-                </strong>
+                <strong>{activeStats.reduce((sum, item) => sum + item.hours, 0).toFixed(1)} h</strong>
               </div>
               <div>
                 <span>Antal pass</span>
-                <strong>
-                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.shiftCount, 0)}
-                </strong>
+                <strong>{activeStats.reduce((sum, item) => sum + item.shiftCount, 0)}</strong>
               </div>
               <div>
                 <span>Morgonpass</span>
-                <strong>
-                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.morningShifts, 0)}
-                </strong>
+                <strong>{activeStats.reduce((sum, item) => sum + item.morningShifts, 0)}</strong>
               </div>
               <div>
                 <span>Avslutande pass</span>
-                <strong>
-                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.closingShifts, 0)}
-                </strong>
+                <strong>{activeStats.reduce((sum, item) => sum + item.closingShifts, 0)}</strong>
               </div>
             </div>
 
@@ -3489,14 +3557,13 @@ export default function App() {
                     <th>Person</th>
                     <th>Timmar</th>
                     <th>Pass</th>
-                    <th>Morgonpass</th>
-                    <th>Avslutande pass</th>
+                    <th>Morgon</th>
+                    <th>Avslutande</th>
                     <th>Dagar</th>
-                    <th>Snitt/pass</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {weeklyStatsByPerson.map((item) => (
+                  {activeStats.map((item) => (
                     <tr key={item.person.id}>
                       <td>
                         <span className="stats-person">
@@ -3509,7 +3576,6 @@ export default function App() {
                       <td>{item.morningShifts}</td>
                       <td>{item.closingShifts}</td>
                       <td>{item.daysWorked}</td>
-                      <td>{item.averageShiftHours.toFixed(1)} h</td>
                     </tr>
                   ))}
                 </tbody>
