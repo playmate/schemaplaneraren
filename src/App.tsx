@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.1.1';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1689,6 +1689,41 @@ export default function App() {
     );
   }
 
+  function movePersonToDay(person: Staff, toDay: DayKey) {
+    const toDateKey = localDateKey(addDays(weekStart, DAY_KEYS.indexOf(toDay)));
+
+    if (assignments.some((assignment) => assignment.employeeId === person.id && assignment.date === toDateKey)) {
+      setMessage(`${person.name} har redan ett pass på ${DAY_LABELS[toDay]}.`);
+      return;
+    }
+
+    const targetIndex = DAY_KEYS.indexOf(toDay);
+    const sourceAssignments = assignments
+      .filter(
+        (assignment) =>
+          assignment.employeeId === person.id &&
+          visibleDateKeys.includes(assignment.date) &&
+          assignment.date !== toDateKey
+      )
+      .map((assignment) => {
+        const date = new Date(`${assignment.date}T12:00:00`);
+        const day = getDayKey(date);
+        return {
+          assignment,
+          day,
+          distance: Math.abs(DAY_KEYS.indexOf(day) - targetIndex),
+        };
+      })
+      .sort((a, b) => a.distance - b.distance || DAY_KEYS.indexOf(a.day) - DAY_KEYS.indexOf(b.day));
+
+    if (!sourceAssignments.length) {
+      assignPerson(person.id, toDateKey);
+      return;
+    }
+
+    movePersonBetweenDays(person, sourceAssignments[0].day, toDay);
+  }
+
   function parsePrompt() {
     const text = prompt.trim().toLocaleLowerCase('sv-SE');
     if (!text) return;
@@ -1718,6 +1753,25 @@ export default function App() {
         setMessage('Kunde inte hitta personen eller dagen i flyttkommandot.');
       } else {
         movePersonBetweenDays(personToMove, fromDay, toDay);
+      }
+      setPrompt('');
+      return;
+    }
+
+    const moveToMatch = text.match(
+      /^flytta(?:\s+över)?\s+(.+?)\s+(?:till|på)\s+(måndag|tisdag|onsdag|torsdag|fredag)(?:en)?\.?$/
+    );
+    if (moveToMatch) {
+      const personName = moveToMatch[1].trim();
+      const personToMove = staff.find(
+        (item) => item.name.toLocaleLowerCase('sv-SE') === personName
+      );
+      const toDay = SWEDISH_DAY_TO_KEY[moveToMatch[2]];
+
+      if (!personToMove || !toDay) {
+        setMessage('Kunde inte hitta personen eller dagen i flyttkommandot.');
+      } else {
+        movePersonToDay(personToMove, toDay);
       }
       setPrompt('');
       return;
@@ -2033,7 +2087,7 @@ export default function App() {
                 <div><strong>Arbetstid en dag</strong><span>“Anna jobbar 10-14 på onsdag” · “Sara arbetar mellan 9 och 15 fredag”</span></div>
                 <div><strong>Inte före/efter</strong><span>“Erik kan inte jobba före 10 måndag” · “Sara kan inte jobba efter 14 tisdag”</span></div>
                 <div><strong>Blockerad tid</strong><span>“Erik kan inte jobba 10-12 på torsdag” · “Anna kan inte jobba kl 11 på måndagar”</span></div>
-                <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag”</span></div>
+                <div><strong>Flytta mellan dagar</strong><span>“flytta Erik från torsdag till måndag” · “flytta Anna till måndag” · “flytta över Sara till fredag”</span></div>
                 <div><strong>Byt två personer</strong><span>“byt Erik med Sara på tisdag” · “byt plats på Erik och Sara på tisdag”</span></div>
                 <div><strong>Visa en dag</strong><span>“vem jobbar fredag?” · “visa schema tisdag”</span></div>
                 <div><strong>Lediga pass</strong><span>“visa lediga pass onsdag” · “vilka pass är lediga fredag?”</span></div>
