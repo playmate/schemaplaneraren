@@ -609,11 +609,15 @@ export default function App() {
     }
   }
 
-  function generateSimpleSchedule() {
+  function generateSimpleSchedule(
+    staffSource: Staff[] = staff,
+    excluded: Array<{ employeeId: string; date: string }> = [],
+    reason?: string
+  ) {
     const weekKeys = visibleDates.map(localDateKey);
     const generated: Assignment[] = [];
-    const assignedMinutes: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
-    const closingCounts: Record<string, number> = Object.fromEntries(staff.map((person) => [person.id, 0]));
+    const assignedMinutes: Record<string, number> = Object.fromEntries(staffSource.map((person) => [person.id, 0]));
+    const closingCounts: Record<string, number> = Object.fromEntries(staffSource.map((person) => [person.id, 0]));
     const lastWorkedSlot: Record<string, { date: string; end: string } | undefined> = {};
     const lastClosingDate: Record<string, string | undefined> = {};
     const coverageGaps: string[] = [];
@@ -648,9 +652,10 @@ export default function App() {
         const isClosingShift = slotEnd === workdayEnd;
         const isOpeningShift = slotStart === toMinutes(WORK_START);
 
-        const candidates = staff
+        const candidates = staffSource
           .filter((person) => {
             if (!person.days[day]) return false;
+            if (excluded.some((entry) => entry.employeeId === person.id && entry.date === dateKey)) return false;
             const availability = person.workTimes[day] ?? { start: WORK_START, end: WORK_END };
             const blocked = person.blockedTimes?.[day] ?? [];
             return (
@@ -735,9 +740,13 @@ export default function App() {
     ]);
 
     if (coverageGaps.length) {
-      setMessage(`Schemat skapades, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`);
+      setMessage(`${reason ? reason + ' ' : ''}Schemat genererades om, men följande tider saknar tillgänglig personal: ${coverageGaps.join(', ')}.`);
     } else {
-      setMessage(`Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)} och hänsyn till jämn fördelning, flera pass i rad, avslutande pass och stängning följt av öppning nästa dag.`);
+      setMessage(
+        reason
+          ? `${reason} Schemat genererades om automatiskt.`
+          : `Hela arbetsdagen 08:00–16:30 bemannades med passlängd ${durationLabel(shiftLengthMinutes)} och hänsyn till jämn fördelning, flera pass i rad, avslutande pass och stängning följt av öppning nästa dag.`
+      );
     }
   }
 
@@ -764,7 +773,7 @@ export default function App() {
     if (!text) return;
 
     if (/^(generera|generera schema|skapa schema|gör schema|full schema|fyll schema|schemalägg)$/.test(text)) {
-      generateSimpleSchedule();
+      generateSimpleSchedule(staff);
       setPrompt('');
       return;
     }
@@ -792,40 +801,59 @@ export default function App() {
         const blockedStart = minutesToTime(startMinutes);
         const blockedEnd = minutesToTime(endMinutes);
 
-        setStaff((current) =>
-          current.map((item) => {
-            if (item.id !== person.id) return item;
-            const existing = item.blockedTimes?.[dayKey] ?? [];
-            const duplicate = existing.some((period) => period.start === blockedStart && period.end === blockedEnd);
-            return duplicate
-              ? item
-              : {
-                  ...item,
-                  blockedTimes: {
-                    ...item.blockedTimes,
-                    [dayKey]: [...existing, { start: blockedStart, end: blockedEnd }],
-                  },
-                };
-          })
+        const nextStaff = staff.map((item) => {
+          if (item.id !== person.id) return item;
+          const existing = item.blockedTimes?.[dayKey] ?? [];
+          const duplicate = existing.some((period) => period.start === blockedStart && period.end === blockedEnd);
+          return duplicate
+            ? item
+            : {
+                ...item,
+                blockedTimes: {
+                  ...item.blockedTimes,
+                  [dayKey]: [...existing, { start: blockedStart, end: blockedEnd }],
+                },
+              };
+        });
+
+        const hasConflict = assignments.some(
+          (assignment) =>
+            assignment.employeeId === person.id &&
+            assignment.date === dateKey &&
+            overlapsTime(assignment.start, assignment.end, { start: blockedStart, end: blockedEnd })
         );
 
-        setAssignments((current) =>
-          current.filter((assignment) => {
-            if (assignment.employeeId !== person.id || assignment.date !== dateKey) return true;
-            return !overlapsTime(assignment.start, assignment.end, { start: blockedStart, end: blockedEnd });
-          })
-        );
+        setStaff(nextStaff);
 
-        setMessage(`${person.name} kan inte jobba ${blockedStart}–${blockedEnd} på ${DAY_LABELS[dayKey]}. Regeln gäller återkommande varje ${dayWord}.`);
+        if (hasConflict) {
+          generateSimpleSchedule(
+            nextStaff,
+            [],
+            `${person.name} kan inte jobba ${blockedStart}–${blockedEnd} på ${DAY_LABELS[dayKey]}.`
+          );
+        } else {
+          setMessage(`${person.name} kan inte jobba ${blockedStart}–${blockedEnd} på ${DAY_LABELS[dayKey]}. Ingen krock fanns i nuvarande schema.`);
+        }
+
         setPrompt('');
         return;
       }
 
       if (/sjuk|ledig|vab|semester|ta bort|borta|frånvarande/.test(text)) {
-        setAssignments((current) =>
-          current.filter((assignment) => !(assignment.employeeId === person.id && assignment.date === dateKey))
+        const hasConflict = assignments.some(
+          (assignment) => assignment.employeeId === person.id && assignment.date === dateKey
         );
-        setMessage(`${person.name} togs bort från ${DAY_LABELS[dayKey]}.`);
+
+        if (hasConflict) {
+          generateSimpleSchedule(
+            staff,
+            [{ employeeId: person.id, date: dateKey }],
+            `${person.name} togs bort från ${DAY_LABELS[dayKey]}.`
+          );
+        } else {
+          setMessage(`${person.name} hade inget pass på ${DAY_LABELS[dayKey]}, så schemat behövde inte ändras.`);
+        }
+
         setPrompt('');
         return;
       }
@@ -951,7 +979,7 @@ export default function App() {
                   <button onClick={() => setCursorDate(addDays(cursorDate, 7))}>→</button>
                 </div>
                 <h2>Vecka {getIsoWeek(cursorDate)}</h2>
-                <button className="secondary" onClick={generateSimpleSchedule}>Skapa schema</button>
+                <button className="secondary" onClick={() => generateSimpleSchedule(staff)}>Skapa schema</button>
               </div>
 
               <div className="shift-length-control">
