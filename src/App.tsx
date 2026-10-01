@@ -36,7 +36,7 @@ const WORK_END = '16:30';
 const LUNCH_START = '12:00';
 const LUNCH_END = '12:30';
 const PIXELS_PER_MINUTE = 1.25;
-const APP_VERSION = '0.1.34';
+const APP_VERSION = '0.1.35';
 
 const DAY_KEYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 const DAY_LABELS: Record<DayKey, string> = {
@@ -1156,17 +1156,14 @@ export default function App() {
     return totals;
   }, [assignments, staff, cursorDate]);
 
-  const monthlyStatsByPerson = useMemo(() => {
-    const year = cursorDate.getFullYear();
-    const month = cursorDate.getMonth();
-
+  const weeklyStatsByPerson = useMemo(() => {
     return staff
       .map((person) => {
-        const personAssignments = assignments.filter((assignment) => {
-          if (assignment.employeeId !== person.id) return false;
-          const date = new Date(`${assignment.date}T12:00:00`);
-          return date.getFullYear() === year && date.getMonth() === month;
-        });
+        const personAssignments = assignments.filter(
+          (assignment) =>
+            assignment.employeeId === person.id &&
+            visibleDateKeys.includes(assignment.date)
+        );
 
         const hours = personAssignments.reduce(
           (sum, assignment) => sum + netWorkMinutes(assignment.start, assignment.end) / 60,
@@ -1195,10 +1192,11 @@ export default function App() {
       .sort(
         (a, b) =>
           b.hours - a.hours ||
-          b.shiftCount - a.shiftCount ||
+          b.morningShifts - a.morningShifts ||
+          b.closingShifts - a.closingShifts ||
           a.person.name.localeCompare(b.person.name, 'sv')
       );
-  }, [assignments, staff, cursorDate]);
+  }, [assignments, staff, visibleDateKeys]);
 
   const selectedMonthLabel = useMemo(
     () => cursorDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' }),
@@ -3443,13 +3441,17 @@ export default function App() {
           <main className="stats-view">
             <div className="stats-toolbar">
               <div className="week-nav">
-                <button onClick={() => setCursorDate(addMonths(cursorDate, -1))}>←</button>
+                <button onClick={() => setCursorDate(addDays(cursorDate, -7))}>←</button>
                 <button onClick={() => setCursorDate(new Date())}>Idag</button>
-                <button onClick={() => setCursorDate(addMonths(cursorDate, 1))}>→</button>
+                <button onClick={() => setCursorDate(addDays(cursorDate, 7))}>→</button>
               </div>
               <div>
-                <h2>Statistik</h2>
-                <span>{selectedMonthLabel}</span>
+                <h2>Statistik · Vecka {getIsoWeek(cursorDate)}</h2>
+                <span>
+                  {visibleDates[0].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' })}
+                  {' – '}
+                  {visibleDates[4].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
               </div>
             </div>
 
@@ -3457,25 +3459,25 @@ export default function App() {
               <div>
                 <span>Totalt antal timmar</span>
                 <strong>
-                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.hours, 0).toFixed(1)} h
+                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.hours, 0).toFixed(1)} h
                 </strong>
               </div>
               <div>
                 <span>Antal pass</span>
                 <strong>
-                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.shiftCount, 0)}
+                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.shiftCount, 0)}
                 </strong>
               </div>
               <div>
                 <span>Morgonpass</span>
                 <strong>
-                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.morningShifts, 0)}
+                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.morningShifts, 0)}
                 </strong>
               </div>
               <div>
                 <span>Avslutande pass</span>
                 <strong>
-                  {monthlyStatsByPerson.reduce((sum, item) => sum + item.closingShifts, 0)}
+                  {weeklyStatsByPerson.reduce((sum, item) => sum + item.closingShifts, 0)}
                 </strong>
               </div>
             </div>
@@ -3494,7 +3496,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {monthlyStatsByPerson.map((item) => (
+                  {weeklyStatsByPerson.map((item) => (
                     <tr key={item.person.id}>
                       <td>
                         <span className="stats-person">
