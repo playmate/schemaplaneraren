@@ -1348,7 +1348,6 @@ export default function App() {
         <section className="prompt-bar">
           <div className="prompt-copy">
             <strong>Vad vill du göra?</strong>
-            <span>Exempel: “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag”, “Erik kan inte jobba kl 11 på måndagar”</span>
           </div>
           <div className="prompt-input-row">
             <input
@@ -1358,6 +1357,9 @@ export default function App() {
               placeholder="Skriv en instruktion…"
             />
             <button className="primary" onClick={parsePrompt}>Kör</button>
+          </div>
+          <div className="prompt-examples">
+            Exempel: “skapa schema”, “lägg till Erik måndag”, “Sara sjuk tisdag”, “Erik kan inte jobba kl 11 på måndagar”
           </div>
           {message && <div className="message">{message}</div>}
         </section>
